@@ -27,6 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: horizon
+          cache-on-failure: true
       - run: cargo install cargo-ndk --locked
 
       - name: Build libhorizon_client.so
