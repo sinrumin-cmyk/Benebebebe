@@ -18,8 +18,11 @@
 GitHub Actions: Actions, "Build APK", артефакт `horizon-debug-apk`.
 
 ## Игровые файлы
-Делаются на ПК шагом prepare из своей копии Minecraft Java. Папку `26.3` из
-`~/.local/share/horizon/game-files/horizon-client/` запакуй в zip и импортируй через меню.
+Нужна своя купленная копия Minecraft Java. Вариант без ПК, всё в Termux (не проверено):
+`bash tools/termux_prepare.sh` скачивает версию, библиотеки и ассеты с серверов Mojang
+(`tools/fetch_minecraft.py`), ставит `openjdk-25`, собирает и запускает `horizon-prepare` и кладёт
+`horizon-26.3-files.zip` в Загрузки. Этот zip импортируй через меню. Нужно несколько ГБ места и время.
+Вариант с ПК: prepare там же, папку `26.3` из `~/.local/share/horizon/game-files/horizon-client/` в zip.
 
 ## Управление
 Левая часть экрана: плавающий стик (до верхнего края: бег). Свободная область: свайп вращает камеру,
