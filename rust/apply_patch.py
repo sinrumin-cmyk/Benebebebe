@@ -34,6 +34,7 @@ edit(client / "src/lib.rs", [(
 
 edit(client / "src/game.rs", [
     ("mod clipboard;\n", "mod clipboard;\nmod touch;\n"),
+    ("let mut args = std::env::args().skip(1);", "let mut args = horizon_client::platform::args().into_iter();"),
     ("EventLoop::new()?.run_app(&mut game)?;", "horizon_client::platform::event_loop()?.run_app(&mut game)?;"),
     ("EventLoop::new()?.run_app(&mut app)?;", "horizon_client::platform::event_loop()?.run_app(&mut app)?;"),
     ("        if self.pending_save.is_some() {\n            match self.poll_closing_save() {",
@@ -74,6 +75,7 @@ with open(client / "Cargo.toml", "a") as f:
 [target.'cfg(target_os = "android")'.dependencies]
 winit = {{ version = "0.30.13", features = ["android-native-activity"] }}
 jni = "0.21"
+android_log-sys = "0.3"
 ''')
 print("patched crates/horizon-client/Cargo.toml (tail)")
 

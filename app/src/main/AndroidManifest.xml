@@ -7,17 +7,32 @@
         android:label="Horizon"
         android:hasCode="true"
         android:allowBackup="false">
+
+        <!-- Menu: its own process, so a game crash leaves it alive to show the logs. -->
         <activity
-            android:name=".HorizonActivity"
+            android:name=".LauncherActivity"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|navigation">
-            <meta-data android:name="android.app.lib_name" android:value="horizon_client" />
+            android:theme="@android:style/Theme.Material.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".LogActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <!-- The game itself, in a separate process: killed on exit (android_main runs once per process). -->
+        <activity
+            android:name=".HorizonActivity"
+            android:exported="false"
+            android:process=":game"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|navigation">
+            <meta-data android:name="android.app.lib_name" android:value="horizon_client" />
         </activity>
     </application>
 </manifest>
