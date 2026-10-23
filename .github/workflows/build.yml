@@ -19,7 +19,7 @@ jobs:
         run: |
           git clone https://github.com/ludovic111/horizon horizon
           git -C horizon checkout "${{ github.event.inputs.horizon_ref || 'main' }}"
-          python3 rust/apply_patch.py horizon --linux-cfg
+          python3 rust/apply_patch.py horizon
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -27,6 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: horizon
+          cache-on-failure: true
           cache-on-failure: true
       - run: cargo install cargo-ndk --locked
 
