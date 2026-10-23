@@ -1,0 +1,54 @@
+name: Build APK
+on:
+  workflow_dispatch:
+    inputs:
+      horizon_ref:
+        description: "ludovic111/horizon branch, tag or commit"
+        default: "main"
+  push:
+    branches: [main]
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Horizon and apply the Android patch
+        run: |
+          git clone https://github.com/ludovic111/horizon horizon
+          git -C horizon checkout "${{ github.event.inputs.horizon_ref || 'main' }}"
+          python3 rust/apply_patch.py horizon --linux-cfg
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: horizon
+      - run: cargo install cargo-ndk --locked
+
+      - name: Build libhorizon_client.so
+        working-directory: horizon
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs"
+          cargo ndk -t arm64-v8a -P 26 -o "$GITHUB_WORKSPACE/app/src/main/jniLibs" \
+            build --release --lib -p horizon-client --no-default-features --features audio
+          cp "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
