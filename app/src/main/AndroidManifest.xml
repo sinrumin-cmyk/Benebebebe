@@ -4,7 +4,6 @@
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
 
     <application
-        android:name=".HorizonApp"
         android:label="Horizon"
         android:hasCode="true"
         android:allowBackup="false">

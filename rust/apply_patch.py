@@ -55,10 +55,7 @@ edit(client / "src/auth.rs", [
     ('    let doc = discovery()?;\n    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;\n    match agent()',
      '    let url = match std::env::var("HORIZON_JOIN_URL").ok().filter(|u| !u.is_empty()) {\n'
      '        Some(url) => url,\n'
-     '        None => {\n'
-     '            let doc = discovery()?;\n'
-     '            endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?\n'
-     '        }\n'
+     '        None => endpoint(&discovery()?, "session", "join").ok_or(JoinError::Unavailable)?,\n'
      '    };\n    match agent()'),
 ])
 

@@ -4,7 +4,7 @@ on:
     inputs:
       horizon_ref:
         description: "ludovic111/horizon branch, tag or commit"
-        default: "33e35d37c0362a0580e4927bfc12d0b15a3dc5a7"
+        default: "main"
   push:
     branches: [main]
 
@@ -18,7 +18,7 @@ jobs:
       - name: Get Horizon and apply the Android patch
         run: |
           git clone https://github.com/ludovic111/horizon horizon
-          git -C horizon checkout "${{ github.event.inputs.horizon_ref || '33e35d37c0362a0580e4927bfc12d0b15a3dc5a7' }}"
+          git -C horizon checkout "${{ github.event.inputs.horizon_ref || 'main' }}"
           python3 rust/apply_patch.py horizon
 
       - uses: dtolnay/rust-toolchain@stable
@@ -48,6 +48,17 @@ jobs:
         with:
           gradle-version: "8.7"
       - run: gradle assembleDebug --no-daemon
+
+      - name: Check that every manifest class is inside the APK
+        run: |
+          apk=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          unzip -l "$apk" | grep -E "classes[0-9]*\.dex" || { echo "No classes.dex in APK"; exit 1; }
+          unzip -l "$apk" | grep "lib/arm64-v8a/libhorizon_client.so" || { echo "libhorizon_client.so missing"; exit 1; }
+          mkdir -p dexcheck && unzip -o -q "$apk" 'classes*.dex' -d dexcheck
+          for c in LauncherActivity LogActivity HorizonActivity; do
+            grep -aq "Ldev/horizon/mobile/$c;" dexcheck/*.dex || { echo "Class $c missing from dex"; exit 1; }
+          done
+          echo "APK contents OK"
 
       - uses: actions/upload-artifact@v4
         with:
