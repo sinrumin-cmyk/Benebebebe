@@ -55,6 +55,17 @@ fn android_main(app: AndroidApp) {
     alog(4, &format!("home = {}", home.display()));
     // SAFETY: nothing else runs yet.
     unsafe { std::env::set_var("HORIZON_HOME", &home) };
+    // The launcher's HORIZON_* settings (an account's session server, say), one KEY=VALUE per line.
+    if let Ok(text) = std::fs::read_to_string(home.join("game-env.txt")) {
+        for line in text.lines() {
+            if let Some((key, value)) = line.split_once('=')
+                && key.starts_with("HORIZON_")
+            {
+                // SAFETY: nothing else runs yet.
+                unsafe { std::env::set_var(key, value) };
+            }
+        }
+    }
     let _ = std::env::set_current_dir(&home); // options.txt is read from the working folder
     let _ = APP.set(app);
     logging::init(&home, "Render thread");

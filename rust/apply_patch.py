@@ -37,6 +37,8 @@ edit(client / "src/game.rs", [
     ("let mut args = std::env::args().skip(1);", "let mut args = horizon_client::platform::args().into_iter();"),
     ("EventLoop::new()?.run_app(&mut game)?;", "horizon_client::platform::event_loop()?.run_app(&mut game)?;"),
     ("EventLoop::new()?.run_app(&mut app)?;", "horizon_client::platform::event_loop()?.run_app(&mut app)?;"),
+    ("                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))\n                .is_ok();",
+     "                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))\n                .is_ok()\n                || cfg!(target_os = \"android\"); // winit cannot grab on Android; touch look needs `captured`"),
     ("        if self.pending_save.is_some() {\n            match self.poll_closing_save() {",
      "        self.apply_touch_input(event_loop);\n        if self.pending_save.is_some() {\n            match self.poll_closing_save() {"),
 ])
@@ -45,6 +47,17 @@ edit(client / "src/game/pad.rs", [(
     "let state = hardware.merge(&self.pad.injected);",
     "let state = hardware\n            .merge(&self.pad.injected)\n            .merge(&horizon_client::touch_input::pad());",
 )])
+
+# Ely.by (and other Yggdrasil servers): session files of type "ely", and HORIZON_JOIN_URL as the join endpoint.
+edit(client / "src/auth.rs", [
+    ('if field("user_type").is_some_and(|t| t != "msa") {',
+     'if field("user_type").is_some_and(|t| !matches!(t, "msa" | "ely")) {'),
+    ('    let doc = discovery()?;\n    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;\n    match agent()',
+     '    let url = match std::env::var("HORIZON_JOIN_URL").ok().filter(|u| !u.is_empty()) {\n'
+     '        Some(url) => url,\n'
+     '        None => endpoint(&discovery()?, "session", "join").ok_or(JoinError::Unavailable)?,\n'
+     '    };\n    match agent()'),
+])
 
 # arboard has no Android backend: an always-empty stand-in with the same calls.
 edit(client / "src/clipboard.rs", [(
