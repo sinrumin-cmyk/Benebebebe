@@ -74,29 +74,53 @@ mod arboard {
     }
 }
 '''
-users = [f for f in sorted((client / "src").rglob("*.rs"))
-         if "arboard::" in f.read_text() and "mod arboard" not in f.read_text()]
+users = [f for f in sorted(root.rglob("*.rs"))
+         if "target" not in f.relative_to(root).parts and "arboard::" in f.read_text() and "mod arboard" not in f.read_text()]
 if not users:
     print("note: no source file uses arboard::, clipboard shim skipped")
 for f in users:
     f.write_text(f.read_text().rstrip("\n") + "\n" + SHIM)
     print("patched (arboard shim)", f.relative_to(root))
 
+NOT_ANDROID = "[target.'cfg(not(target_os = \"android\"))'.dependencies]"
+
+def move_arboard(cargo):
+    """Moves a plain `arboard` dependency of this crate to the not-android target table. Returns True if it changed anything."""
+    lines = cargo.read_text().splitlines(keepends=True)
+    out, moved, section = [], [], None
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("["):
+            section = s
+        if section == "[dependencies]" and re.match(r"arboard\s*(=|\.)", s):
+            moved.append(ln if ln.endswith("\n") else ln + "\n")
+            continue
+        out.append(ln)
+    if not moved:
+        return False
+    text = "".join(out)
+    if NOT_ANDROID in text:
+        text = text.replace(NOT_ANDROID + "\n", NOT_ANDROID + "\n" + "".join(moved), 1)
+    else:
+        text = text.rstrip("\n") + "\n\n" + NOT_ANDROID + "\n" + "".join(moved)
+    cargo.write_text(text)
+    print("arboard moved to not-android in", cargo.relative_to(root))
+    return True
+
+manifests = [c for c in sorted(root.rglob("Cargo.toml")) if c != root / "Cargo.toml" and "target" not in c.relative_to(root).parts]
+found = [c for c in manifests if move_arboard(c)]
+for c in manifests:
+    if c not in found and re.search(r"arboard", c.read_text()):
+        print("WARNING: arboard mentioned in", c.relative_to(root), "in a form this script does not handle")
+
 cargo = client / "Cargo.toml"
 ctext = cargo.read_text()
-m = re.search(r'^arboard\s*=.*\n', ctext, re.M)
-arb = m.group(0) if m else None
-if arb:
-    ctext = ctext.replace(arb, "", 1)
 if "\n[dependencies]\n" not in ctext:
     sys.exit(f"{cargo}: no [dependencies] section")
 if "crate-type" not in ctext:
     ctext = ctext.replace("\n[dependencies]\n", '\n[lib]\ncrate-type = ["rlib", "cdylib"]\n\n[dependencies]\n', 1)
 cargo.write_text(ctext)
 with open(cargo, "a") as f:
-    f.write("\n[target.'cfg(not(target_os = \"android\"))'.dependencies]\n")
-    if arb:
-        f.write(arb)
     f.write('''
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", features = ["android-native-activity"] }

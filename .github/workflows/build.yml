@@ -30,6 +30,10 @@ jobs:
           cache-on-failure: true
       - run: cargo install cargo-ndk --locked
 
+      - name: Who pulls in arboard on Android? (diagnostic)
+        working-directory: horizon
+        run: cargo tree -p horizon-client --target aarch64-linux-android -i arboard || echo "arboard is not in the Android dependency tree"
+
       - name: Build libhorizon_client.so
         working-directory: horizon
         run: |
