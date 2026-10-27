@@ -60,9 +60,10 @@ edit(client / "src/auth.rs", [
 ])
 
 # arboard has no Android backend: an always-empty stand-in with the same calls.
-edit(client / "src/clipboard.rs", [(
-    "/// A clipboard: the system's, or an in-memory one in tests.",
-    '''#[cfg(target_os = "android")]
+# The file is found by content (upstream moves files around); the shim is appended, so no anchor text is needed.
+SHIM = '''
+#[cfg(target_os = "android")]
+#[allow(dead_code)]
 mod arboard {
     pub enum Error { ContentNotAvailable }
     pub struct Clipboard;
@@ -72,25 +73,37 @@ mod arboard {
         pub fn set_text(&mut self, _: String) -> Result<(), Error> { Err(Error::ContentNotAvailable) }
     }
 }
+'''
+users = [f for f in sorted((client / "src").rglob("*.rs"))
+         if "arboard::" in f.read_text() and "mod arboard" not in f.read_text()]
+if not users:
+    print("note: no source file uses arboard::, clipboard shim skipped")
+for f in users:
+    f.write_text(f.read_text().rstrip("\n") + "\n" + SHIM)
+    print("patched (arboard shim)", f.relative_to(root))
 
-/// A clipboard: the system's, or an in-memory one in tests.''',
-)])
-
-arb = 'arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }\n'
-edit(client / "Cargo.toml", [
-    ("\n[dependencies]\n", '\n[lib]\ncrate-type = ["rlib", "cdylib"]\n\n[dependencies]\n'),
-    (arb, ""),
-])
-with open(client / "Cargo.toml", "a") as f:
-    f.write(f'''
-[target.'cfg(not(target_os = "android"))'.dependencies]
-{arb}
+cargo = client / "Cargo.toml"
+ctext = cargo.read_text()
+m = re.search(r'^arboard\s*=.*\n', ctext, re.M)
+arb = m.group(0) if m else None
+if arb:
+    ctext = ctext.replace(arb, "", 1)
+if "\n[dependencies]\n" not in ctext:
+    sys.exit(f"{cargo}: no [dependencies] section")
+if "crate-type" not in ctext:
+    ctext = ctext.replace("\n[dependencies]\n", '\n[lib]\ncrate-type = ["rlib", "cdylib"]\n\n[dependencies]\n', 1)
+cargo.write_text(ctext)
+with open(cargo, "a") as f:
+    f.write("\n[target.'cfg(not(target_os = \"android\"))'.dependencies]\n")
+    if arb:
+        f.write(arb)
+    f.write('''
 [target.'cfg(target_os = "android")'.dependencies]
-winit = {{ version = "0.30.13", features = ["android-native-activity"] }}
+winit = { version = "0.30.13", features = ["android-native-activity"] }
 jni = "0.21"
 android_log-sys = "0.3"
 ''')
-print("patched crates/horizon-client/Cargo.toml (tail)")
+print("patched crates/horizon-client/Cargo.toml")
 
 if "--linux-cfg" in sys.argv:
     files = ["horizon-bench/src/hardware.rs", "horizon-client/src/crash.rs", "horizon-client/src/game.rs",
