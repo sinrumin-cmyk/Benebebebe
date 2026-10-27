@@ -55,7 +55,10 @@ edit(client / "src/auth.rs", [
     ('    let doc = discovery()?;\n    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;\n    match agent()',
      '    let url = match std::env::var("HORIZON_JOIN_URL").ok().filter(|u| !u.is_empty()) {\n'
      '        Some(url) => url,\n'
-     '        None => endpoint(&discovery()?, "session", "join").ok_or(JoinError::Unavailable)?,\n'
+     '        None => {\n'
+     '            let doc = discovery()?;\n'
+     '            endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?\n'
+     '        }\n'
      '    };\n    match agent()'),
 ])
 
@@ -65,7 +68,8 @@ SHIM = '''
 #[cfg(target_os = "android")]
 #[allow(dead_code)]
 mod arboard {
-    pub enum Error { ContentNotAvailable }
+    #[derive(Debug)]
+    pub enum Error { ContentNotAvailable, #[allow(dead_code)] Unknown }
     pub struct Clipboard;
     impl Clipboard {
         pub fn new() -> Result<Self, Error> { Err(Error::ContentNotAvailable) }
