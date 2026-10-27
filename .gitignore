@@ -1,5 +1,5 @@
 build/
 .gradle/
-horizon/
+/horizon/
 app/src/main/jniLibs/
 local.properties
