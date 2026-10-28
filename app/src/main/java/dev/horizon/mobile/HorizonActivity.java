@@ -52,7 +52,7 @@ public class HorizonActivity extends NativeActivity {
         super.onAttachedToWindow();
         if (overlay != null) return;
         try {
-            overlay = new ControlOverlay(this);
+            overlay = LayoutStore.createOverlay(this);
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,

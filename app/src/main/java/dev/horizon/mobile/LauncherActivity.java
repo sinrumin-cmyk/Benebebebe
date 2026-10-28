@@ -18,9 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LauncherActivity extends Activity {
-    private static final int PICK_ZIP = 1;
+    private static final int PICK_ZIP = 1, PICK_LAYOUT = 2;
     private SharedPreferences prefs;
-    private TextView status, importState, distLabel, accountLabel;
+    private TextView status, importState, distLabel, accountLabel, layoutLabel;
     private EditText world, nick;
     private SeekBar dist;
     private CheckBox creative;
@@ -128,6 +128,14 @@ public class LauncherActivity extends Activity {
         creative.setChecked(prefs.getBoolean("creative", false));
         root.addView(creative);
 
+        root.addView(section("Управление"));
+        layoutLabel = text("", 14, Color.WHITE);
+        root.addView(layoutLabel);
+        root.addView(button("Выбрать раскладку", v -> chooseLayout(), 0xFF2B3A4A));
+        root.addView(button("Импорт раскладки Mojo (.json / .zip)", v -> pickLayout(), 0xFF2B3A4A));
+        root.addView(button("Редактор раскладок", v -> startActivity(new Intent(this, LayoutEditorActivity.class)), 0xFF2B3A4A));
+        refreshLayout();
+
         root.addView(section("Диагностика"));
         root.addView(button("Логи и ошибки", v -> startActivity(new Intent(this, LogActivity.class)), 0xFF2B3A4A));
 
@@ -143,6 +151,7 @@ public class LauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (status != null) refreshStatus();
+        if (layoutLabel != null) refreshLayout();   // the editor may have changed the chosen layout
     }
 
     @Override
@@ -258,6 +267,33 @@ public class LauncherActivity extends Activity {
         }, "play").start();
     }
 
+    private void refreshLayout() {
+        layoutLabel.setText("Раскладка: " + LayoutStore.title(LayoutStore.active(this)));
+    }
+
+    private void chooseLayout() {
+        final List<String> ids = LayoutStore.list(this);
+        String[] names = new String[ids.size()];
+        for (int i = 0; i < names.length; i++) names[i] = LayoutStore.title(ids.get(i));
+        new android.app.AlertDialog.Builder(this).setTitle("Раскладка управления")
+                .setItems(names, (d, which) -> {
+                    String id = ids.get(which);
+                    if (!LayoutStore.SIMPLE.equals(id)) {
+                        try { LayoutStore.load(this, id); }
+                        catch (Throwable e) { Toast.makeText(this, "Не подходит: " + e.getMessage(), Toast.LENGTH_LONG).show(); return; }
+                    }
+                    LayoutStore.setActive(this, id);
+                    refreshLayout();
+                }).show();
+    }
+
+    private void pickLayout() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        startActivityForResult(i, PICK_LAYOUT);
+    }
+
     private void pickZip() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -269,8 +305,19 @@ public class LauncherActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != PICK_ZIP || res != RESULT_OK || data == null || data.getData() == null) return;
+        if ((req != PICK_ZIP && req != PICK_LAYOUT) || res != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
+        if (req == PICK_LAYOUT) {
+            try {
+                String id = LayoutStore.importFrom(this, uri);
+                LayoutStore.setActive(this, id);
+                refreshLayout();
+                Toast.makeText(this, "Раскладка «" + LayoutStore.title(id) + "» добавлена и выбрана", Toast.LENGTH_LONG).show();
+            } catch (Throwable e) {
+                Toast.makeText(this, "Не импортировалась: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         importState.setText("Начинаю…");
         new Thread(() -> {
             try {

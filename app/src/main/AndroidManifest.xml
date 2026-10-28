@@ -24,6 +24,15 @@
             android:exported="false"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
+        <!-- Control layout editor: runs in the menu process, saves plain Mojo JSON that the game reads. -->
+        <activity
+            android:name=".LayoutEditorActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:windowSoftInputMode="adjustPan"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|navigation" />
+
         <!-- The game itself, in a separate process: killed on exit (android_main runs once per process). -->
         <activity
             android:name=".HorizonActivity"
