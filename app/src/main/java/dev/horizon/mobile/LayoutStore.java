@@ -85,14 +85,16 @@ final class LayoutStore {
     /** The controls for the game: the chosen layout, or the simple built-in ones if it will not load. */
     static View createOverlay(Context c) {
         String id = active(c);
+        View controls = null;
         if (!SIMPLE.equals(id)) {
             try {
-                return new ControlsView(c, load(c, id));
+                controls = new ControlsView(c, load(c, id));
             } catch (Throwable e) {
                 Toast.makeText(c, "Раскладка «" + title(id) + "» не загрузилась: " + e.getMessage() + ". Включены простые кнопки.", Toast.LENGTH_LONG).show();
             }
         }
-        return new ControlOverlay(c);
+        if (controls == null) controls = new ControlOverlay(c);
+        return new GameOverlay(c, controls);
     }
 
     /** Copies a picked .json / .zip into the layouts folder as plain JSON; returns its id. */

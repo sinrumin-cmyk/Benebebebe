@@ -11,6 +11,7 @@ import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.*;
+import android.widget.Switch;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -23,7 +24,7 @@ public class LauncherActivity extends Activity {
     private TextView status, importState, distLabel, accountLabel, layoutLabel;
     private EditText world, nick;
     private SeekBar dist;
-    private CheckBox creative;
+    private Switch startInWorld, creativeSwitch;
     private float dp;
 
     @Override
@@ -61,90 +62,222 @@ public class LauncherActivity extends Activity {
         } catch (Throwable ignored) {}
     }
 
+    private Md3 m;
+    private TextView play, playHint, scaleLabel;
+    private LinearLayout worldGroup, chipRow;
+    private SeekBar scaleSeek;
+
     private void build() {
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
         dp = getResources().getDisplayMetrics().density;
+        m = new Md3(this);
         Dirs.home(this); // makes Android/data/<package>/files exist
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(0xFF101418);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(px(20), px(36), px(20), px(24));
+        final ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(m.surface);
+        scroll.setVerticalScrollBarEnabled(false);
+        final LinearLayout root = m.column();
+        root.setPadding(px(16), px(16), px(16), px(28));
         scroll.addView(root);
+        // edge to edge: the bars take the page's colour and the content keeps clear of them
+        getWindow().setStatusBarColor(m.surface);
+        getWindow().setNavigationBarColor(m.surface);
+        if (!m.dark) {
+            scroll.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
 
-        TextView title = text("Horizon", 28, Color.WHITE);
-        root.addView(title);
-        root.addView(text("Minecraft Java 26.3 на Rust", 13, 0xFF8899AA));
+        int n = 0;
 
-        status = text("", 14, Color.WHITE);
-        status.setPadding(0, px(18), 0, px(10));
-        root.addView(status);
+        // ---- hero: name, state of the game files, the one big button
+        LinearLayout hero = m.column();
+        android.graphics.drawable.GradientDrawable heroBg = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{m.primaryContainer, m.container});
+        heroBg.setCornerRadius(40 * dp);
+        hero.setBackground(heroBg);
+        hero.setPadding(px(24), px(28), px(24), px(24));
+        TextView kicker = m.text("MINECRAFT JAVA 26.3  ·  RUST", Md3.LABEL, Md3.alpha(m.onPrimaryContainer, 0.75f));
+        hero.addView(kicker);
+        TextView title = m.text("Horizon", Md3.DISPLAY, m.onPrimaryContainer);
+        title.setPadding(0, px(4), 0, px(14));
+        hero.addView(title);
+        status = m.text("", Md3.BODY, m.onPrimaryContainer);
+        hero.addView(status);
+        play = m.hero("▶   Играть", v -> play());
+        hero.addView(play, m.buttonParams(20, 72));
+        playHint = m.text("", Md3.BODY, Md3.alpha(m.onPrimaryContainer, 0.8f));
+        playHint.setGravity(android.view.Gravity.CENTER);
+        playHint.setPadding(0, px(10), 0, 0);
+        hero.addView(playHint);
+        root.addView(hero);
+        m.enter(hero, n++);
 
-        root.addView(button("▶  Играть", v -> play(), 0xFF2E7D32));
-        root.addView(button("Импорт файлов игры (.zip)", v -> pickZip(), 0xFF2B3A4A));
-        importState = text("", 12, 0xFF8899AA);
-        root.addView(importState);
+        // ---- the game
+        LinearLayout game = m.card("Игра", "⛏");
+        game.addView(m.text("Дальность прорисовки", Md3.BODY, m.onVariant), m.lp(-2, -2, 14));
+        distLabel = m.text("", Md3.TITLE, m.onSurface);
+        game.addView(distLabel);
+        dist = m.slider(22, prefs.getInt("distance", 8) - 2, new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar s, int p, boolean u) { distLabel.setText((p + 2) + " чанков"); }
+            public void onStartTrackingTouch(SeekBar s) {}
+            public void onStopTrackingTouch(SeekBar s) { saveSettings(); }
+        });
+        distLabel.setText((dist.getProgress() + 2) + " чанков");
+        game.addView(dist);
 
-        root.addView(section("Аккаунт"));
-        accountLabel = text("", 14, Color.WHITE);
-        root.addView(accountLabel);
-        root.addView(button("Войти через Ely.by", v -> elyDialog(), 0xFF2B3A4A));
-        root.addView(button("Выйти из аккаунта", v -> { Ely.signOut(prefs); refreshAccount(); }, 0xFF3A2B2B));
-        TextView nickHint = text("Ник без аккаунта (офлайн)", 12, 0xFF8899AA);
-        nickHint.setPadding(0, px(10), 0, 0);
-        root.addView(nickHint);
-        nick = new EditText(this);
-        nick.setSingleLine(true);
-        nick.setTextColor(Color.WHITE);
-        nick.setText(prefs.getString("nick", ""));
-        root.addView(nick);
+        startInWorld = m.toggle(Settings.startInWorld(this), on -> {
+            prefs.edit().putBoolean("start_in_world", on).commit();
+            refreshPlay();
+        });
+        LinearLayout swRow = m.row();
+        swRow.setPadding(0, px(10), 0, px(2));
+        LinearLayout swTexts = m.column();
+        swTexts.addView(m.text("Сразу в мир", Md3.TITLE, m.onSurface));
+        TextView swSub = m.text("Пропустить главное меню Horizon и открыть мир ниже", Md3.BODY, m.onVariant);
+        swSub.setPadding(0, px(2), px(12), 0);
+        swTexts.addView(swSub);
+        swRow.addView(swTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        swRow.addView(startInWorld);
+        game.addView(swRow);
 
-        root.addView(section("Настройки"));
-        distLabel = text("", 14, Color.WHITE);
-        root.addView(distLabel);
-        dist = new SeekBar(this);
-        dist.setMax(22);                                  // 2..24 chunks
-        dist.setProgress(prefs.getInt("distance", 8) - 2);
-        dist.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            public void onProgressChanged(SeekBar s, int p, boolean u) { distLabel.setText("Дальность прорисовки: " + (p + 2) + " чанков"); }
+        worldGroup = m.column();
+        worldGroup.addView(m.text("Название мира", Md3.BODY, m.onVariant), m.lp(-2, -2, 12));
+        world = m.field(prefs.getString("world", "New World"), InputType.TYPE_CLASS_TEXT);
+        world.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void afterTextChanged(android.text.Editable e) { if (playHint != null) refreshPlay(); }
+        });
+        worldGroup.addView(world, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 6));
+        creativeSwitch = m.toggle(prefs.getBoolean("creative", false), on -> prefs.edit().putBoolean("creative", on).commit());
+        LinearLayout crRow = m.row();
+        crRow.setPadding(0, px(10), 0, 0);
+        LinearLayout crTexts = m.column();
+        crTexts.addView(m.text("Творческий режим", Md3.TITLE, m.onSurface));
+        crTexts.addView(m.text("Для нового мира", Md3.BODY, m.onVariant));
+        crRow.addView(crTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        crRow.addView(creativeSwitch);
+        worldGroup.addView(crRow);
+        game.addView(worldGroup);
+        root.addView(game, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(game, n++);
+
+        // ---- controls
+        LinearLayout controls = m.card("Управление", "🎮");
+        layoutLabel = m.text("", Md3.TITLE, m.onSurface);
+        layoutLabel.setPadding(0, px(14), 0, 0);
+        controls.addView(layoutLabel);
+        LinearLayout layoutButtons = m.row();
+        TextView choose = m.tonal("Выбрать", v -> chooseLayout());
+        TextView editor = m.tonal("Редактор", v -> startActivity(new Intent(this, LayoutEditorActivity.class)));
+        layoutButtons.addView(choose, new LinearLayout.LayoutParams(0, px(48), 1));
+        View gap = new View(this);
+        layoutButtons.addView(gap, new LinearLayout.LayoutParams(px(10), 1));
+        layoutButtons.addView(editor, new LinearLayout.LayoutParams(0, px(48), 1));
+        controls.addView(layoutButtons, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(48), 12));
+        controls.addView(m.plain("Импорт раскладки Mojo (.json / .zip)", v -> pickLayout()), m.buttonParams(4, 44));
+        refreshLayout();
+
+        controls.addView(m.text("Размер раскладки", Md3.BODY, m.onVariant), m.lp(-2, -2, 16));
+        scaleLabel = m.text("", Md3.TITLE, m.onSurface);
+        controls.addView(scaleLabel);
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chipRow = m.row();
+        chipScroll.addView(chipRow);
+        controls.addView(chipScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 8));
+        scaleSeek = m.slider(30, (Math.min(Settings.layoutScale(this), 200) - 50) / 5, new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar s, int p, boolean u) {
+                if (u) setScale(50 + p * 5);
+            }
             public void onStartTrackingTouch(SeekBar s) {}
             public void onStopTrackingTouch(SeekBar s) {}
         });
-        distLabel.setText("Дальность прорисовки: " + (dist.getProgress() + 2) + " чанков");
-        root.addView(dist);
+        controls.addView(scaleSeek);
+        refreshScale();
 
-        root.addView(text("Название мира", 14, Color.WHITE));
-        world = new EditText(this);
-        world.setSingleLine(true);
-        world.setInputType(InputType.TYPE_CLASS_TEXT);
-        world.setTextColor(Color.WHITE);
-        world.setText(prefs.getString("world", "New World"));
-        root.addView(world);
+        controls.addView(m.switchRow("Жесты касания", "Тап по экрану бьёт и ставит, удержание ломает. Выключено: это делают кнопки раскладки и мышь",
+                Settings.touchGestures(this), on -> prefs.edit().putBoolean("touch_gestures", on).commit(), null));
+        controls.addView(m.switchRow("Виртуальная мышь", "Палец двигает курсор как тачпад, тап щёлкает. Включается и кнопкой раскладки",
+                Settings.virtualMouse(this), on -> prefs.edit().putBoolean("virtual_mouse", on).commit(), null));
+        root.addView(controls, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(controls, n++);
 
-        creative = new CheckBox(this);
-        creative.setText("Творческий режим (для нового мира)");
-        creative.setTextColor(Color.WHITE);
-        creative.setChecked(prefs.getBoolean("creative", false));
-        root.addView(creative);
+        // ---- screen
+        LinearLayout screen = m.card("Экран", "📈");
+        screen.addView(m.switchRow("Счётчик FPS", "Кадры в секунду и время кадра в углу экрана. В игре его включает и выключает кнопка раскладки «Счётчик FPS»",
+                Settings.showFps(this), on -> prefs.edit().putBoolean("show_fps", on).commit(), null));
+        root.addView(screen, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(screen, n++);
 
-        root.addView(section("Управление"));
-        layoutLabel = text("", 14, Color.WHITE);
-        root.addView(layoutLabel);
-        root.addView(button("Выбрать раскладку", v -> chooseLayout(), 0xFF2B3A4A));
-        root.addView(button("Импорт раскладки Mojo (.json / .zip)", v -> pickLayout(), 0xFF2B3A4A));
-        root.addView(button("Редактор раскладок", v -> startActivity(new Intent(this, LayoutEditorActivity.class)), 0xFF2B3A4A));
-        refreshLayout();
+        // ---- account
+        LinearLayout account = m.card("Аккаунт", "👤");
+        accountLabel = m.text("", Md3.BODY, m.onVariant);
+        accountLabel.setPadding(0, px(12), 0, 0);
+        account.addView(accountLabel);
+        LinearLayout accountButtons = m.row();
+        accountButtons.addView(m.filled("Войти через Ely.by", v -> elyDialog()), new LinearLayout.LayoutParams(0, px(52), 1));
+        View gap2 = new View(this);
+        accountButtons.addView(gap2, new LinearLayout.LayoutParams(px(10), 1));
+        accountButtons.addView(m.outlinedButton("Выйти", v -> { Ely.signOut(prefs); refreshAccount(); }), new LinearLayout.LayoutParams(px(120), px(52)));
+        account.addView(accountButtons, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(52), 14));
+        account.addView(m.text("Ник без аккаунта (офлайн)", Md3.BODY, m.onVariant), m.lp(-2, -2, 16));
+        nick = m.field(prefs.getString("nick", ""), InputType.TYPE_CLASS_TEXT);
+        account.addView(nick, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 6));
+        root.addView(account, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(account, n++);
 
-        root.addView(section("Диагностика"));
-        root.addView(button("Логи и ошибки", v -> startActivity(new Intent(this, LogActivity.class)), 0xFF2B3A4A));
+        // ---- game files
+        LinearLayout files = m.card("Файлы игры", "📦");
+        TextView help = m.text("Файлы делаются на ПК шагом prepare из твоей копии Minecraft Java (папка " + Dirs.VERSION
+                + " из game-files/horizon-client). Их запаковывают в zip и импортируют сюда.", Md3.BODY, m.onVariant);
+        help.setPadding(0, px(12), 0, 0);
+        files.addView(help);
+        files.addView(m.tonal("Импорт файлов игры (.zip)", v -> pickZip()), m.buttonParams(14, 48));
+        importState = m.text("", Md3.BODY, m.onVariant);
+        importState.setPadding(0, px(8), 0, 0);
+        files.addView(importState);
+        root.addView(files, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(files, n++);
 
-        TextView help = text("Игровые файлы делаются на ПК шагом prepare из твоей копии Minecraft Java "
-                + "(папка " + Dirs.VERSION + " из game-files/horizon-client), её запаковывают в zip и импортируют сюда.", 12, 0xFF8899AA);
-        help.setPadding(0, px(16), 0, 0);
-        root.addView(help);
+        root.addView(m.outlinedButton("Логи и ошибки", v -> startActivity(new Intent(this, LogActivity.class))), m.buttonParams(14, 48));
 
+        scroll.setOnApplyWindowInsetsListener((v, in) -> {
+            root.setPadding(px(16) + in.getSystemWindowInsetLeft(), px(16) + in.getSystemWindowInsetTop(),
+                    px(16) + in.getSystemWindowInsetRight(), px(28) + in.getSystemWindowInsetBottom());
+            return in;
+        });
         setContentView(scroll);
+        refreshPlay();
+    }
+
+    private TextView scaleChip(int value) {
+        final int v = value;
+        return m.chip(value + "%", Settings.layoutScale(this) == value, x -> setScale(v));
+    }
+
+    private void setScale(int percent) {
+        prefs.edit().putInt("layout_scale", percent).commit();
+        scaleSeek.setProgress((Math.min(percent, 200) - 50) / 5);
+        refreshScale();
+    }
+
+    private void refreshScale() {
+        int now = Settings.layoutScale(this);
+        scaleLabel.setText(now + " %");
+        chipRow.removeAllViews();
+        for (int v : new int[]{50, 75, 90, 100, 110, 120, 130, 150, 175, 200}) {
+            TextView c = scaleChip(v);
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(40));
+            p.rightMargin = px(8);
+            chipRow.addView(c, p);
+        }
+    }
+
+    /** The big button says where it goes: the main menu, or straight into the world. */
+    private void refreshPlay() {
+        boolean direct = startInWorld.isChecked();
+        worldGroup.setVisibility(direct ? View.VISIBLE : View.GONE);
+        playHint.setText(direct ? "Откроется мир «" + world.getText().toString().trim() + "»" : "Откроется главное меню Horizon");
     }
 
     @Override
@@ -163,11 +296,12 @@ public class LauncherActivity extends Activity {
     private void refreshStatus() {
         boolean ok = Dirs.hasResources(this);
         StringBuilder s = new StringBuilder();
-        s.append(ok ? "✔ Файлы игры на месте" : "✖ Файлов игры нет: сначала импорт").append('\n');
-        s.append(Dirs.home(this).getAbsolutePath());
-        if (crashedSinceLastLaunch()) s.append("\n⚠ Прошлый запуск завершился ошибкой: смотри «Логи и ошибки»");
+        s.append(ok ? "✔  Файлы игры на месте" : "✖  Файлов игры нет: сначала импорт");
+        if (crashedSinceLastLaunch()) s.append("\n⚠  Прошлый запуск завершился ошибкой: смотри «Логи и ошибки»");
         status.setText(s);
-        status.setTextColor(ok ? Color.WHITE : 0xFFFFB74D);
+        status.setTextColor(ok ? m.onPrimaryContainer : m.onErrorContainer);
+        status.setBackground(m.shape(ok ? Md3.alpha(m.primary, 0.22f) : m.errorContainer, 18));
+        status.setPadding(px(14), px(10), px(14), px(10));
         refreshAccount();
     }
 
@@ -187,7 +321,7 @@ public class LauncherActivity extends Activity {
         pass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         EditText code = new EditText(this); code.setHint("Код 2FA (если включён)"); code.setSingleLine(true);
         box.addView(user); box.addView(pass); box.addView(code);
-        new android.app.AlertDialog.Builder(this).setTitle("Вход через Ely.by").setView(box)
+        m.show(new android.app.AlertDialog.Builder(this).setTitle("Вход через Ely.by").setView(box)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Войти", (d, w) -> {
                     String u = user.getText().toString().trim(), pw = pass.getText().toString(), cd = code.getText().toString().trim();
@@ -198,7 +332,7 @@ public class LauncherActivity extends Activity {
                         final String m = msg;
                         runOnUiThread(() -> { Toast.makeText(this, m, Toast.LENGTH_LONG).show(); refreshAccount(); });
                     }, "ely").start();
-                }).show();
+                }));
     }
 
     private boolean crashedSinceLastLaunch() {
@@ -215,7 +349,7 @@ public class LauncherActivity extends Activity {
         prefs.edit().putInt("distance", dist.getProgress() + 2)
                 .putString("world", world.getText().toString().trim())
                 .putString("nick", nick.getText().toString().trim())
-                .putBoolean("creative", creative.isChecked()).apply();
+                .putBoolean("creative", creativeSwitch.isChecked()).commit();
     }
 
     private void play() {
@@ -224,12 +358,17 @@ public class LauncherActivity extends Activity {
             return;
         }
         saveSettings();
+        final boolean direct = startInWorld.isChecked();
+        final boolean gestures = Settings.touchGestures(this);
         final List<String> a = new ArrayList<>();
         a.add("--resources"); a.add(Dirs.resources(this).getAbsolutePath());
         a.add("--render-distance"); a.add(String.valueOf(dist.getProgress() + 2));
+        // No --world: the game opens Horizon's own main menu (worlds, servers, options).
         String w = world.getText().toString().trim();
-        if (!w.isEmpty()) { a.add("--world"); a.add(w); }
-        if (creative.isChecked()) a.add("--creative");
+        if (direct && !w.isEmpty()) {
+            a.add("--world"); a.add(w);
+            if (creativeSwitch.isChecked()) a.add("--creative");
+        }
         final String offlineNick = nick.getText().toString().trim();
 
         new Thread(() -> {
@@ -237,6 +376,8 @@ public class LauncherActivity extends Activity {
             File env = new File(home, "game-env.txt"), session = new File(home, "session.json");
             env.delete();
             session.delete();
+            final StringBuilder envText = new StringBuilder();
+            if (gestures) envText.append("HORIZON_TOUCH_GESTURES=1\n");
             String warning = null;
             boolean signed = false;
             if (Ely.signedIn(prefs)) {
@@ -244,38 +385,41 @@ public class LauncherActivity extends Activity {
                     Ely.refresh(prefs);
                     Ely.writeSession(prefs, session);          // the game reads it within two minutes, then deletes it
                     a.add("--session-file"); a.add(session.getAbsolutePath());
-                    try (FileWriter f = new FileWriter(env)) { f.write("HORIZON_JOIN_URL=" + Ely.JOIN_URL); }
+                    envText.append("HORIZON_JOIN_URL=").append(Ely.JOIN_URL).append('\n');
                     signed = true;
                 } catch (Throwable e) {
                     warning = "Ely.by: " + e.getMessage() + ". Играю офлайн, войди заново.";
                 }
             }
             if (!signed && !offlineNick.isEmpty()) { a.add("--name"); a.add(offlineNick); }
-            try (FileWriter f = new FileWriter(new File(home, "game-args.txt"))) {
-                f.write(String.join("\n", a));
+            try {
+                if (envText.length() > 0) try (FileWriter f = new FileWriter(env)) { f.write(envText.toString()); }
+                try (FileWriter f = new FileWriter(new File(home, "game-args.txt"))) {
+                    f.write(String.join("\n", a));
+                }
             } catch (Throwable e) {
-                final String m = "Не записал аргументы: " + e;
-                runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_LONG).show());
+                final String msg = "Не записал аргументы: " + e;
+                runOnUiThread(() -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show());
                 return;
             }
             final String warn = warning;
             runOnUiThread(() -> {
                 if (warn != null) Toast.makeText(this, warn, Toast.LENGTH_LONG).show();
-                prefs.edit().putLong("last_launch", System.currentTimeMillis()).apply();
+                prefs.edit().putLong("last_launch", System.currentTimeMillis()).commit();
                 startActivity(new Intent(this, HorizonActivity.class));
             });
         }, "play").start();
     }
 
     private void refreshLayout() {
-        layoutLabel.setText("Раскладка: " + LayoutStore.title(LayoutStore.active(this)));
+        layoutLabel.setText(LayoutStore.title(LayoutStore.active(this)));
     }
 
     private void chooseLayout() {
         final List<String> ids = LayoutStore.list(this);
         String[] names = new String[ids.size()];
         for (int i = 0; i < names.length; i++) names[i] = LayoutStore.title(ids.get(i));
-        new android.app.AlertDialog.Builder(this).setTitle("Раскладка управления")
+        m.show(new android.app.AlertDialog.Builder(this).setTitle("Раскладка управления")
                 .setItems(names, (d, which) -> {
                     String id = ids.get(which);
                     if (!LayoutStore.SIMPLE.equals(id)) {
@@ -284,7 +428,7 @@ public class LauncherActivity extends Activity {
                     }
                     LayoutStore.setActive(this, id);
                     refreshLayout();
-                }).show();
+                }));
     }
 
     private void pickLayout() {
@@ -329,33 +473,6 @@ public class LauncherActivity extends Activity {
         }, "import").start();
     }
 
-    // ---- small UI helpers ----
+    // ---- small UI helper ----
     private int px(int v) { return Math.round(v * dp); }
-
-    private TextView text(String s, int sp, int color) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(color);
-        return t;
-    }
-
-    private TextView section(String s) {
-        TextView t = text(s, 16, 0xFF9CCC65);
-        t.setPadding(0, px(22), 0, px(6));
-        return t;
-    }
-
-    private Button button(String label, View.OnClickListener l, int color) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextColor(Color.WHITE);
-        b.setBackgroundColor(color);
-        b.setOnClickListener(l);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(52));
-        p.topMargin = px(8);
-        b.setLayoutParams(p);
-        return b;
-    }
 }

@@ -145,6 +145,7 @@ public final class LayoutEditorActivity extends Activity implements LayoutEditor
 
         setContentView(root);
         view.setListener(this);
+        view.setScale(Settings.layoutScale(this));
 
         String id = getIntent().getStringExtra("id");
         loadId(id != null ? id : LayoutStore.active(this));
@@ -265,7 +266,7 @@ public final class LayoutEditorActivity extends Activity implements LayoutEditor
                 "Добавить кнопку", "Добавить ящик", "Добавить джойстик",
                 "Загрузить…", "Импорт из файла…", "Новая пустая",
                 "Сохранить", "Сохранить как…", "Сделать активной",
-                "Экспорт в файл…", "Удалить эту раскладку", "Выход"};
+                "Экспорт в файл…", "Удалить эту раскладку", "Размер раскладки…", "Выход"};
         new AlertDialog.Builder(this).setItems(items, (d, which) -> {
             switch (which) {
                 case 0: view.addButton(); break;
@@ -279,9 +280,44 @@ public final class LayoutEditorActivity extends Activity implements LayoutEditor
                 case 8: activate(); break;
                 case 9: export(); break;
                 case 10: deleteLayout(); break;
+                case 11: scaleDialog(); break;
                 default: confirmDiscard(this::finish);
             }
         }).show();
+    }
+
+    /** The same size setting the launcher has (like MojoLauncher's button size): 100 % is the layout as drawn. */
+    private void scaleDialog() {
+        final int[] value = {Settings.layoutScale(this)};
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(px(20), px(12), px(20), 0);
+        final TextView label = new TextView(this);
+        label.setText("Размер кнопок: " + value[0] + " %");
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        box.addView(label);
+        SeekBar bar = new SeekBar(this);
+        bar.setMax(30);                                   // 50 % .. 200 % in steps of 5
+        bar.setProgress((Math.min(value[0], 200) - 50) / 5);
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                value[0] = 50 + p * 5;
+                label.setText("Размер кнопок: " + value[0] + " %");
+                if (fromUser) {
+                    Settings.prefs(LayoutEditorActivity.this).edit().putInt("layout_scale", value[0]).commit();
+                    view.setScale(value[0]);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {}
+        });
+        box.addView(bar);
+        new AlertDialog.Builder(this).setTitle("Размер раскладки").setView(box).setPositiveButton("Готово", null).show();
     }
 
     private void chooseLayout() {
@@ -574,7 +610,9 @@ public final class LayoutEditorActivity extends Activity implements LayoutEditor
         final Button b = button("", null);
         b.setText((slot + 1) + ":  " + LayoutKeys.label(it.d.keys[slot], glfw));
         b.setOnClickListener(v -> {
-            final LayoutKeys.Opt[] opts = LayoutKeys.OPTS;
+            final LayoutKeys.Opt[] opts = new LayoutKeys.Opt[LayoutKeys.OPTS.length + LayoutKeys.EXTRA.length];
+            System.arraycopy(LayoutKeys.OPTS, 0, opts, 0, LayoutKeys.OPTS.length);
+            System.arraycopy(LayoutKeys.EXTRA, 0, opts, LayoutKeys.OPTS.length, LayoutKeys.EXTRA.length);
             String[] names = new String[opts.length + 2];
             names[0] = "— нет —";
             for (int i = 0; i < opts.length; i++) names[i + 1] = opts[i].label;
@@ -596,7 +634,7 @@ public final class LayoutEditorActivity extends Activity implements LayoutEditor
         code.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED);
         code.setHint(layout.glfwKeys() ? "код GLFW" : "код Android KeyEvent");
         new AlertDialog.Builder(this).setTitle("Код клавиши")
-                .setMessage("Такие клавиши в Horizon ничего не делают, но сохранятся в файле для Mojo.")
+                .setMessage("Код Android (версия раскладки 9) или GLFW (старые). Если у Horizon такой клавиши нет, кнопка ничего не сделает.")
                 .setView(code)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Готово", (d, w) -> {

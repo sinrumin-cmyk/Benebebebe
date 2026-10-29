@@ -38,6 +38,7 @@
             android:name=".HorizonActivity"
             android:exported="false"
             android:process=":game"
+            android:windowSoftInputMode="adjustNothing|stateHidden"
             android:screenOrientation="sensorLandscape"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|navigation">

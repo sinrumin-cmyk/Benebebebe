@@ -3,11 +3,15 @@
 use crate::{crash, gamepad::Button, logging, touch_input};
 use jni::{
     JNIEnv,
-    objects::JClass,
-    sys::{jboolean, jfloat, jint},
+    objects::{JClass, JString},
+    sys::{jboolean, jfloat, jint, jlong},
 };
 use std::{ffi::CString, path::PathBuf, sync::OnceLock};
-use winit::platform::android::activity::AndroidApp;
+use winit::{
+    event::{ElementState, KeyEvent},
+    keyboard::{Key, KeyLocation, NamedKey, PhysicalKey, SmolStr},
+    platform::android::activity::AndroidApp,
+};
 
 static APP: OnceLock<AndroidApp> = OnceLock::new();
 
@@ -114,4 +118,174 @@ pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeTouch(
     y: jfloat,
 ) {
     touch_input::touch(phase, x, y);
+}
+
+// ---------------------------------------------------------------- keys, text and mouse from the shell
+
+/// `scheme` 0: an Android KEYCODE_*, 1: a GLFW key code (old Mojo layouts). Unknown codes do nothing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeKey(
+    _env: JNIEnv,
+    _class: JClass,
+    scheme: jint,
+    code: jint,
+    down: jboolean,
+) {
+    if let Some(key) = touch_input::key_from(scheme, code) {
+        touch_input::push_key(key, down != 0);
+    }
+}
+
+/// Characters from the on-screen keyboard (any layout, any language).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeText(
+    mut env: JNIEnv,
+    _class: JClass,
+    text: JString,
+) {
+    if let Ok(s) = env.get_string(&text) {
+        touch_input::push_text(String::from(s));
+    }
+}
+
+/// A mouse moved by (dx, dy) pixels.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeMouseMove(
+    _env: JNIEnv,
+    _class: JClass,
+    dx: jfloat,
+    dy: jfloat,
+) {
+    touch_input::push_mouse_move(dx, dy);
+}
+
+/// A mouse button: 0 left, 1 right, 2 middle.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeMouseButton(
+    _env: JNIEnv,
+    _class: JClass,
+    button: jint,
+    down: jboolean,
+) {
+    if let Ok(b) = u8::try_from(button) {
+        touch_input::push_mouse_button(b, down != 0);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeScroll(
+    _env: JNIEnv,
+    _class: JClass,
+    notches: jfloat,
+) {
+    touch_input::push_wheel(notches);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeVirtualMouse(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jboolean,
+) {
+    touch_input::set_virtual_mouse(on != 0);
+}
+
+/// Game frames drawn since the game started (the shell's FPS counter).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeFrames(_env: JNIEnv, _class: JClass) -> jlong {
+    touch_input::frames() as jlong
+}
+
+/// True while a text field is in focus in the game.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeWantsText(_env: JNIEnv, _class: JClass) -> jboolean {
+    jboolean::from(touch_input::wants_text())
+}
+
+/// The mouse cursor to draw: x in the high 32 bits, y in the low ones; -1 when none.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeCursor(_env: JNIEnv, _class: JClass) -> jlong {
+    touch_input::cursor_packed()
+}
+
+/// The `logical_key` for a key pressed with no text.
+fn named(physical: PhysicalKey) -> Key {
+    use winit::keyboard::KeyCode as K;
+    let PhysicalKey::Code(code) = physical else {
+        return Key::Unidentified(winit::keyboard::NativeKey::Unidentified);
+    };
+    Key::Named(match code {
+        K::Enter | K::NumpadEnter => NamedKey::Enter,
+        K::Backspace => NamedKey::Backspace,
+        K::Tab => NamedKey::Tab,
+        K::Escape => NamedKey::Escape,
+        K::Delete => NamedKey::Delete,
+        K::ArrowUp => NamedKey::ArrowUp,
+        K::ArrowDown => NamedKey::ArrowDown,
+        K::ArrowLeft => NamedKey::ArrowLeft,
+        K::ArrowRight => NamedKey::ArrowRight,
+        K::Home => NamedKey::Home,
+        K::End => NamedKey::End,
+        K::PageUp => NamedKey::PageUp,
+        K::PageDown => NamedKey::PageDown,
+        K::Space => NamedKey::Space,
+        K::F1 => NamedKey::F1,
+        K::F2 => NamedKey::F2,
+        K::F3 => NamedKey::F3,
+        K::F4 => NamedKey::F4,
+        K::F5 => NamedKey::F5,
+        K::F6 => NamedKey::F6,
+        K::F7 => NamedKey::F7,
+        K::F8 => NamedKey::F8,
+        K::F9 => NamedKey::F9,
+        K::F10 => NamedKey::F10,
+        K::F11 => NamedKey::F11,
+        K::F12 => NamedKey::F12,
+        _ => return Key::Unidentified(winit::keyboard::NativeKey::Unidentified),
+    })
+}
+
+/// A key event made up by the shell (F3 from a layout button, text from the on-screen keyboard...).
+///
+/// winit has no constructor for `KeyEvent` (its last field is private), so this lays a struct out exactly as
+/// winit 0.30 declares it and reinterprets it. The sizes and alignments are compared when the game is built,
+/// and the public fields are read back before the event is used; `None` means that did not hold, and the key
+/// is dropped rather than risk a bad value.
+pub fn key_event(physical: PhysicalKey, text: Option<&str>, down: bool, repeat: bool) -> Option<KeyEvent> {
+    #[allow(dead_code)]
+    struct Mirror {
+        physical_key: PhysicalKey,
+        logical_key: Key,
+        text: Option<SmolStr>,
+        location: KeyLocation,
+        state: ElementState,
+        repeat: bool,
+        platform_specific: (),
+    }
+    const _: () = assert!(size_of::<Mirror>() == size_of::<KeyEvent>());
+    const _: () = assert!(align_of::<Mirror>() == align_of::<KeyEvent>());
+
+    let state = if down { ElementState::Pressed } else { ElementState::Released };
+    let mirror = Mirror {
+        physical_key: physical,
+        logical_key: match text {
+            Some(t) => Key::Character(SmolStr::new(t)),
+            None => named(physical),
+        },
+        text: text.map(SmolStr::new),
+        location: KeyLocation::Standard,
+        state,
+        repeat,
+        platform_specific: (),
+    };
+    // SAFETY: `Mirror` has the fields of winit 0.30's `KeyEvent` in the same order (Android's
+    // `KeyEventExtra` is an empty struct, like `()`), so the two have the same layout; size and alignment are
+    // asserted above and the result is checked below.
+    let event: KeyEvent = unsafe { std::mem::transmute::<Mirror, KeyEvent>(mirror) };
+    if event.physical_key == physical && event.state == state && event.repeat == repeat && event.text.as_deref() == text {
+        Some(event)
+    } else {
+        alog(6, "key_event: winit's KeyEvent does not have the expected layout, key dropped");
+        None
+    }
 }

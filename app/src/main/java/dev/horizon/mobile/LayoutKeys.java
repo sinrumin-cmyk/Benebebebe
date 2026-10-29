@@ -3,10 +3,12 @@ package dev.horizon.mobile;
 /**
  * What a Mojo key does in Horizon. Horizon takes gamepad-style input, so a key becomes a pad button,
  * a left-stick direction, a hotbar slot or the "hide controls" switch. Keys with no counterpart
- * (F3, Tab, the on-screen keyboard...) return NONE and their buttons are not shown.
+ * (F3, Tab, letters the pad has no use for...) go to the game as real key presses, see {@link #action}.
  */
 final class LayoutKeys {
     static final int NONE = 0, BTN = 1, DIR = 2, UI = 3, SLOT = 4;
+    /** Beyond the pad: a real key {INJECT, scheme, code}, the on-screen keyboard, the virtual mouse, the middle button, the FPS counter. */
+    static final int INJECT = 10, KEYBOARD = 11, VMOUSE = 12, MMB = 13, FPS = 14;
     static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
 
     private static int[] act(int type, int arg) { return new int[]{type, arg}; }
@@ -68,6 +70,96 @@ final class LayoutKeys {
         }
     }
 
+    // ---------------------------------------------------------------- everything else a layout can press
+
+    private static boolean in(int v, int lo, int hi) {
+        return v >= lo && v <= hi;
+    }
+
+    /** Keys the game can be sent as real key presses (kept in step with touch_input.rs's tables). */
+    static boolean injectable(int key, boolean glfw) {
+        if (glfw) {
+            if (in(key, 65, 90) || in(key, 48, 57) || in(key, 290, 301)) return true;
+            switch (key) {
+                case 32: case 256: case 257: case 335: case 258: case 259: case 260: case 261: case 262: case 263:
+                case 264: case 265: case 266: case 267: case 268: case 269: case 280: case 340: case 341: case 342:
+                case 343: case 344: case 345: case 346: case 347: case 44: case 45: case 46: case 47: case 59:
+                case 61: case 91: case 92: case 93: case 96: case 39:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        if (in(key, 29, 54) || in(key, 7, 16) || in(key, 131, 142)) return true;
+        switch (key) {
+            case 61: case 66: case 160: case 62: case 67: case 112: case 111: case 19: case 20: case 21: case 22:
+            case 122: case 123: case 92: case 93: case 124: case 59: case 60: case 113: case 114: case 57: case 58:
+            case 117: case 118: case 115: case 55: case 56: case 76: case 74: case 75: case 71: case 72: case 73:
+            case 69: case 70: case 68:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * What pressing this key does: a pad action (see {@link #map}), else a real key press, the keyboard, the
+     * virtual mouse, the middle button or the FPS counter; null for a key nothing can do.
+     */
+    static int[] action(int key, boolean glfw) {
+        int[] a = map(key, glfw);
+        if (a != null) return a;
+        switch (key) {
+            case -1: return act(KEYBOARD, 0);
+            case -5: return act(VMOUSE, 0);
+            case -6: return act(MMB, 0);
+            case -11: return act(FPS, 0);
+            default: break;
+        }
+        if (key > 0 && injectable(key, glfw)) return new int[]{INJECT, glfw ? 1 : 0, key};
+        return null;
+    }
+
+    /** More keys the editor offers, all sent to the game as real key presses (or the shell's own switches). */
+    static final Opt[] EXTRA = buildExtra();
+
+    private static Opt[] buildExtra() {
+        java.util.List<Opt> l = new java.util.ArrayList<>();
+        l.add(new Opt("Экранная клавиатура", -1, -1));
+        l.add(new Opt("Виртуальная мышь (вкл / выкл)", -5, -5));
+        l.add(new Opt("Средняя кнопка мыши", -6, -6));
+        l.add(new Opt("Счётчик FPS (вкл / выкл)", -11, -11));
+        l.add(new Opt("Tab (список игроков)", 61, 258));
+        l.add(new Opt("Backspace", 67, 259));
+        l.add(new Opt("Delete", 112, 261));
+        l.add(new Opt("F1 (скрыть интерфейс)", 131, 290));
+        l.add(new Opt("F2 (скриншот)", 132, 291));
+        l.add(new Opt("F3 (отладка)", 133, 292));
+        l.add(new Opt("F4", 134, 293));
+        l.add(new Opt("F6", 136, 295));
+        l.add(new Opt("F7", 137, 296));
+        l.add(new Opt("F8", 138, 297));
+        l.add(new Opt("F9", 139, 298));
+        l.add(new Opt("F10", 140, 299));
+        l.add(new Opt("F11 (полный экран)", 141, 300));
+        l.add(new Opt("F12", 142, 301));
+        l.add(new Opt("Стрелка вверх", 19, 265));
+        l.add(new Opt("Стрелка вниз", 20, 264));
+        l.add(new Opt("Стрелка влево", 21, 263));
+        l.add(new Opt("Стрелка вправо", 22, 262));
+        l.add(new Opt("Home", 122, 268));
+        l.add(new Opt("End", 123, 269));
+        l.add(new Opt("Page Up", 92, 266));
+        l.add(new Opt("Page Down", 93, 267));
+        l.add(new Opt("0", 7, 48));
+        String letters = "BCGHIJKLMNOPRUVXYZ";
+        for (int i = 0; i < letters.length(); i++) {
+            char c = letters.charAt(i);
+            l.add(new Opt(String.valueOf(c), 29 + (c - 'A'), c));
+        }
+        return l.toArray(new Opt[0]);
+    }
+
     // ---------------------------------------------------------------- keys the editor offers
 
     /** A key the layout editor offers: its label and its code in both layout formats. */
@@ -118,14 +210,8 @@ final class LayoutKeys {
     static String label(int key, boolean glfw) {
         if (key == 0) return "— нет —";
         for (Opt o : OPTS) if (o.code(glfw) == key) return o.label;
-        String name;
-        switch (key) {
-            case -1: name = "Экранная клавиатура"; break;
-            case -5: name = "Виртуальная мышь"; break;
-            case -6: name = "Средняя кнопка мыши"; break;
-            case -10: name = "Прокрутка клавиатуры"; break;
-            default: name = "Клавиша, код " + key;
-        }
-        return map(key, glfw) == null ? name + " (не работает в Horizon)" : name;
+        for (Opt o : EXTRA) if (o.code(glfw) == key) return o.label;
+        String name = key == -10 ? "Прокрутка клавиатуры" : "Клавиша, код " + key;
+        return action(key, glfw) == null ? name + " (не работает в Horizon)" : name;
     }
 }

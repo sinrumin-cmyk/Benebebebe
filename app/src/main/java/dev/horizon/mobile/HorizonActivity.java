@@ -1,11 +1,19 @@
 package dev.horizon.mobile;
 
 import android.app.NativeActivity;
+import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.inputmethod.BaseInputConnection;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -39,6 +47,145 @@ public class HorizonActivity extends NativeActivity {
 
         super.onCreate(state);
         hideSystemUi();
+        try {
+            // The overlay window cannot take the keyboard (it must not take the focus from the game), so a 1x1
+            // view inside the game's own window does: it is what Gboard, Yandex Keyboard and the rest talk to.
+            ime = new ImeView(this);
+            addContentView(ime, new ViewGroup.LayoutParams(1, 1));
+        } catch (Throwable e) {
+            ime = null;
+        }
+    }
+
+    private ImeView ime;
+    private boolean keyboardShown;
+
+    /** Shows or hides the on-screen keyboard (any thread). */
+    void setKeyboard(final boolean show) {
+        runOnUiThread(() -> {
+            if (ime == null) return;
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            keyboardShown = show;
+            if (show) {
+                ime.requestFocus();
+                imm.restartInput(ime);
+                imm.showSoftInput(ime, 0);
+            } else {
+                imm.hideSoftInputFromWindow(ime.getWindowToken(), 0);
+            }
+        });
+    }
+
+    void toggleKeyboard() {
+        setKeyboard(!keyboardShown);
+    }
+
+    /**
+     * What the on-screen keyboard types into. NativeActivity has no text input of its own, so letters from a
+     * composing keyboard never arrived. Typed text, backspace and enter go to the game as real keys.
+     */
+    private static final class ImeView extends View {
+        ImeView(Context c) {
+            super(c);
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+        }
+
+        @Override
+        public boolean onCheckIsTextEditor() {
+            return true;
+        }
+
+        @Override
+        public InputConnection onCreateInputConnection(EditorInfo out) {
+            out.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            out.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_ACTION_NONE;
+            return new Connection(this);
+        }
+    }
+
+    private static final class Connection extends BaseInputConnection {
+        /** What the keyboard is composing now (a word being typed); the game has already been sent it. */
+        private String composing = "";
+
+        Connection(View v) {
+            super(v, false);
+        }
+
+        private static void key(int code, boolean down) {
+            HorizonInput.nativeKey(0, code, down);
+        }
+
+        /** Makes what the game has typed equal to `now`: backspaces over what changed, then the new tail. */
+        private void replaceComposing(String now) {
+            int common = 0, max = Math.min(composing.length(), now.length());
+            while (common < max && composing.charAt(common) == now.charAt(common)) common++;
+            for (int i = composing.length(); i > common; i--) {
+                key(KeyEvent.KEYCODE_DEL, true);
+                key(KeyEvent.KEYCODE_DEL, false);
+            }
+            if (now.length() > common) HorizonInput.nativeText(now.substring(common));
+        }
+
+        @Override
+        public boolean setComposingText(CharSequence text, int newCursor) {
+            String now = text.toString();
+            replaceComposing(now);
+            composing = now;
+            return true;
+        }
+
+        @Override
+        public boolean commitText(CharSequence text, int newCursor) {
+            replaceComposing(text.toString());
+            composing = "";
+            return true;
+        }
+
+        @Override
+        public boolean finishComposingText() {
+            composing = "";
+            return true;
+        }
+
+        @Override
+        public boolean deleteSurroundingText(int before, int after) {
+            for (int i = 0; i < before; i++) {
+                key(KeyEvent.KEYCODE_DEL, true);
+                key(KeyEvent.KEYCODE_DEL, false);
+            }
+            for (int i = 0; i < after; i++) {
+                key(KeyEvent.KEYCODE_FORWARD_DEL, true);
+                key(KeyEvent.KEYCODE_FORWARD_DEL, false);
+            }
+            composing = "";
+            return true;
+        }
+
+        @Override
+        public boolean performEditorAction(int actionCode) {
+            key(KeyEvent.KEYCODE_ENTER, true);
+            key(KeyEvent.KEYCODE_ENTER, false);
+            return true;
+        }
+
+        @Override
+        public boolean sendKeyEvent(KeyEvent e) {
+            int code = e.getKeyCode();
+            if (e.getAction() == KeyEvent.ACTION_MULTIPLE && e.getCharacters() != null) {
+                HorizonInput.nativeText(e.getCharacters());
+                return true;
+            }
+            boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+            int unicode = e.getUnicodeChar();
+            if (unicode != 0 && code != KeyEvent.KEYCODE_ENTER) {
+                if (down) HorizonInput.nativeText(new String(Character.toChars(unicode)));
+                return true;
+            }
+            key(code, down);
+            return true;
+        }
     }
 
     private View overlay;
@@ -57,6 +204,7 @@ public class HorizonActivity extends NativeActivity {
                     WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM   // keeps it below the keyboard, which then gets its own touches
                             | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                             | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS

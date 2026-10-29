@@ -24,6 +24,15 @@ import java.util.Map;
  * Layout format and behaviour follow MojoLauncher (LGPL-3.0).
  */
 public final class ControlsView extends View {
+    /** What the controls cannot do themselves: the on-screen keyboard and the switches that live on the overlay. */
+    interface Host {
+        void toggleKeyboard();
+
+        void virtualMouseChanged(boolean on);
+
+        void toggleFps();
+    }
+
     private static final class Item {
         LayoutData.Btn d;
         boolean isDrawer, isJoy;
@@ -56,9 +65,22 @@ public final class ControlsView extends View {
     private float lastSx = Float.NaN, lastSy = Float.NaN;
     private int slot;
     private int insetL, insetT, insetR, insetB;
+    private final float scale;                        // the layout size setting, in percent
+    private Host host;
+    private boolean vmouse;
+
+    void setHost(Host h) {
+        host = h;
+        if (Settings.virtualMouse(getContext())) {
+            vmouse = true;
+            HorizonInput.nativeVirtualMouse(true);
+            h.virtualMouseChanged(true);
+        }
+    }
 
     public ControlsView(Context c, LayoutData layout) {
         super(c);
+        scale = Settings.layoutScale(c);
         density = c.getResources().getDisplayMetrics().density;
         margin = Math.round(2 * density);
         setFocusable(false);
@@ -94,7 +116,7 @@ public final class ControlsView extends View {
         List<int[]> acts = new ArrayList<>();
         boolean ui = false;
         for (int k : b.keys) {
-            int[] a = LayoutKeys.map(k, glfw);
+            int[] a = LayoutKeys.action(k, glfw);
             if (a == null) continue;
             acts.add(a);
             if (a[0] == LayoutKeys.UI) ui = true;
@@ -139,15 +161,15 @@ public final class ControlsView extends View {
         if (W == 0 || H == 0) return;
         float aw = W - insetL - insetR, ah = H - insetT - insetB;
         for (Item it : top) {
-            it.w = it.d.w * density;
-            it.h = it.d.h * density;
+            it.w = it.d.w * density * scale / 100f;
+            it.h = it.d.h * density * scale / 100f;
             position(it, aw, ah);
             if (!it.isDrawer) continue;
             for (int i = 0; i < it.subs.size(); i++) {
                 Item s = it.subs.get(i);
                 if (it.orientation.equals("FREE")) {
-                    s.w = s.d.w * density;
-                    s.h = s.d.h * density;
+                    s.w = s.d.w * density * scale / 100f;
+                    s.h = s.d.h * density * scale / 100f;
                     position(s, aw, ah);
                     continue;
                 }
@@ -178,7 +200,7 @@ public final class ControlsView extends View {
         vars.put("screen_width", aw);
         vars.put("screen_height", ah);
         vars.put("margin", margin);
-        vars.put("preferred_scale", 100f);
+        vars.put("preferred_scale", scale);
         it.x = insetL + LayoutExpr.eval(it.d.dx, vars, density);
         it.y = insetT + LayoutExpr.eval(it.d.dy, vars, density);
     }
@@ -290,6 +312,25 @@ public final class ControlsView extends View {
                     break;
                 case LayoutKeys.SLOT:
                     if (down) selectSlot(a[1]);
+                    break;
+                case LayoutKeys.INJECT:
+                    HorizonInput.nativeKey(a[1], a[2], down);
+                    break;
+                case LayoutKeys.MMB:
+                    HorizonInput.nativeMouseButton(2, down);
+                    break;
+                case LayoutKeys.KEYBOARD:
+                    if (down && host != null) host.toggleKeyboard();
+                    break;
+                case LayoutKeys.FPS:
+                    if (down && host != null) host.toggleFps();
+                    break;
+                case LayoutKeys.VMOUSE:
+                    if (down) {
+                        vmouse = !vmouse;
+                        HorizonInput.nativeVirtualMouse(vmouse);
+                        if (host != null) host.virtualMouseChanged(vmouse);
+                    }
                     break;
                 default:
                     break;

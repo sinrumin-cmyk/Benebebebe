@@ -61,6 +61,7 @@ public final class LayoutEditorView extends View {
     private final DashPathEffect dash;
 
     private LayoutData layout = LayoutData.blank();
+    private float scale = 100f;                 // the layout size setting, in percent
     private Listener listener;
     private Item selected;
 
@@ -82,6 +83,12 @@ public final class LayoutEditorView extends View {
 
     void setListener(Listener l) {
         listener = l;
+    }
+
+    /** The size setting of the layout's controls, so the editor shows them as the game will. */
+    void setScale(int percent) {
+        scale = percent;
+        relayout();
     }
 
     void setLayout(LayoutData l) {
@@ -117,7 +124,7 @@ public final class LayoutEditorView extends View {
         if (kind == BUTTON || kind == SUB) {
             it.ok = false;
             for (int k : d.keys) {
-                if (LayoutKeys.map(k, layout.glfwKeys()) != null) {
+                if (LayoutKeys.action(k, layout.glfwKeys()) != null) {
                     it.ok = true;
                     break;
                 }
@@ -171,8 +178,8 @@ public final class LayoutEditorView extends View {
                     default: break;
                 }
             } else {
-                it.w = it.d.w * density;
-                it.h = it.d.h * density;
+                it.w = it.d.w * density * scale / 100f;
+                it.h = it.d.h * density * scale / 100f;
                 position(it, W, H);
             }
             it.box.x = it.x;
@@ -197,7 +204,7 @@ public final class LayoutEditorView extends View {
         vars.put("screen_width", aw);
         vars.put("screen_height", ah);
         vars.put("margin", margin);
-        vars.put("preferred_scale", 100f);
+        vars.put("preferred_scale", scale);
         it.x = LayoutExpr.eval(it.d.dx, vars, density);
         it.y = LayoutExpr.eval(it.d.dy, vars, density);
     }
