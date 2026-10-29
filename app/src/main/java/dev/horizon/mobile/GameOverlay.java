@@ -8,7 +8,6 @@ import android.graphics.RectF;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.view.DisplayCutout;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -19,7 +18,7 @@ import android.view.WindowInsets;
 import android.widget.FrameLayout;
 
 /**
- * Everything drawn over the game: the controls (a layout or the simple buttons), the FPS counter and the
+ * Everything drawn over the game: the controls (a layout or the simple buttons) and the
  * mouse cursor. Also takes a real mouse (move, buttons, wheel) and asks the activity for the on-screen
  * keyboard when the game has a text field in focus.
  */
@@ -27,9 +26,7 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float dp;
     private final Status status;
-    private boolean fpsOn, vmouse, mouseUsed, wantedText;
-    private long lastFrames = -1, lastTime;
-    private float fps, frameMs;
+    private boolean vmouse, mouseUsed, wantedText;
     private float lastX = Float.NaN, lastY = Float.NaN;
     private int buttons;
 
@@ -39,7 +36,6 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
         addView(controls, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         status = new Status(c);
         addView(status, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        fpsOn = Settings.showFps(c);
         if (controls instanceof ControlsView) ((ControlsView) controls).setHost(this);
         if (Build.VERSION.SDK_INT >= 24) setPointerIcon(PointerIcon.getSystemIcon(c, PointerIcon.TYPE_NULL));   // our own cursor is drawn
     }
@@ -49,21 +45,7 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            long now = SystemClock.elapsedRealtime();
             try {
-                long frames = HorizonInput.nativeFrames();
-                if (lastFrames >= 0 && now - lastTime >= 450) {
-                    long n = frames - lastFrames;
-                    float secs = (now - lastTime) / 1000f;
-                    fps = n / secs;
-                    frameMs = n > 0 ? (now - lastTime) / (float) n : 0;
-                    lastFrames = frames;
-                    lastTime = now;
-                    if (fpsOn) status.invalidate();
-                } else if (lastFrames < 0) {
-                    lastFrames = frames;
-                    lastTime = now;
-                }
                 boolean wants = HorizonInput.nativeWantsText();
                 if (wants != wantedText) {
                     wantedText = wants;
@@ -114,12 +96,6 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
     @Override
     public void virtualMouseChanged(boolean on) {
         vmouse = on;
-        status.invalidate();
-    }
-
-    @Override
-    public void toggleFps() {
-        fpsOn = !fpsOn;
         status.invalidate();
     }
 
@@ -225,17 +201,6 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
 
         @Override
         protected void onDraw(Canvas c) {
-            if (fpsOn) {
-                String s = String.format(java.util.Locale.US, "FPS %d  ·  %.1f ms", Math.round(fps), frameMs);
-                float pad = 8 * dp, w = text.measureText(s) + 2 * pad, h = 26 * dp;
-                float x = insetL + 12 * dp, y = insetT + 8 * dp;
-                rect.set(x, y, x + w, y + h);
-                fill.setColor(0x99000000);
-                c.drawRoundRect(rect, h / 2f, h / 2f, fill);
-                text.setColor(fps >= 50 ? 0xFFA5F59B : fps >= 25 ? 0xFFFFE082 : 0xFFFF8A80);
-                Paint.FontMetrics fm = text.getFontMetrics();
-                c.drawText(s, x + pad, y + h / 2f - (fm.ascent + fm.descent) / 2f, text);
-            }
             if (vmouse || mouseUsed) {
                 long packed;
                 try {

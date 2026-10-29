@@ -204,8 +204,8 @@ public class LauncherActivity extends Activity {
 
         // ---- screen
         LinearLayout screen = m.card("Экран", "📈");
-        screen.addView(m.switchRow("Счётчик FPS", "Кадры в секунду и время кадра в углу экрана. В игре его включает и выключает кнопка раскладки «Счётчик FPS»",
-                Settings.showFps(this), on -> prefs.edit().putBoolean("show_fps", on).commit(), null));
+        screen.addView(m.switchRow("Счётчик FPS", "Счётчик самой игры, в углу экрана. Тоже включается в игре: Options → Horizon Settings → Extras",
+                Settings.showFps(this), on -> { prefs.edit().putBoolean("show_fps", on).commit(); ExtrasFile.setFps(this, on); }, null));
         root.addView(screen, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(screen, n++);
 
@@ -376,6 +376,7 @@ public class LauncherActivity extends Activity {
             File env = new File(home, "game-env.txt"), session = new File(home, "session.json");
             env.delete();
             session.delete();
+            ExtrasFile.setFps(this, Settings.showFps(this));
             final StringBuilder envText = new StringBuilder();
             if (gestures) envText.append("HORIZON_TOUCH_GESTURES=1\n");
             String warning = null;

@@ -30,7 +30,6 @@ public final class ControlsView extends View {
 
         void virtualMouseChanged(boolean on);
 
-        void toggleFps();
     }
 
     private static final class Item {
@@ -321,9 +320,6 @@ public final class ControlsView extends View {
                     break;
                 case LayoutKeys.KEYBOARD:
                     if (down && host != null) host.toggleKeyboard();
-                    break;
-                case LayoutKeys.FPS:
-                    if (down && host != null) host.toggleFps();
                     break;
                 case LayoutKeys.VMOUSE:
                     if (down) {

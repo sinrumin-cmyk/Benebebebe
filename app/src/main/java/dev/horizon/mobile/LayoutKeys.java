@@ -7,8 +7,8 @@ package dev.horizon.mobile;
  */
 final class LayoutKeys {
     static final int NONE = 0, BTN = 1, DIR = 2, UI = 3, SLOT = 4;
-    /** Beyond the pad: a real key {INJECT, scheme, code}, the on-screen keyboard, the virtual mouse, the middle button, the FPS counter. */
-    static final int INJECT = 10, KEYBOARD = 11, VMOUSE = 12, MMB = 13, FPS = 14;
+    /** Beyond the pad: a real key {INJECT, scheme, code}, the on-screen keyboard, the virtual mouse, the middle button. */
+    static final int INJECT = 10, KEYBOARD = 11, VMOUSE = 12, MMB = 13;
     static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
 
     private static int[] act(int type, int arg) { return new int[]{type, arg}; }
@@ -104,7 +104,7 @@ final class LayoutKeys {
 
     /**
      * What pressing this key does: a pad action (see {@link #map}), else a real key press, the keyboard, the
-     * virtual mouse, the middle button or the FPS counter; null for a key nothing can do.
+     * virtual mouse, or the middle button; null for a key nothing can do.
      */
     static int[] action(int key, boolean glfw) {
         int[] a = map(key, glfw);
@@ -113,7 +113,6 @@ final class LayoutKeys {
             case -1: return act(KEYBOARD, 0);
             case -5: return act(VMOUSE, 0);
             case -6: return act(MMB, 0);
-            case -11: return act(FPS, 0);
             default: break;
         }
         if (key > 0 && injectable(key, glfw)) return new int[]{INJECT, glfw ? 1 : 0, key};
@@ -128,7 +127,6 @@ final class LayoutKeys {
         l.add(new Opt("Экранная клавиатура", -1, -1));
         l.add(new Opt("Виртуальная мышь (вкл / выкл)", -5, -5));
         l.add(new Opt("Средняя кнопка мыши", -6, -6));
-        l.add(new Opt("Счётчик FPS (вкл / выкл)", -11, -11));
         l.add(new Opt("Tab (список игроков)", 61, 258));
         l.add(new Opt("Backspace", 67, 259));
         l.add(new Opt("Delete", 112, 261));
