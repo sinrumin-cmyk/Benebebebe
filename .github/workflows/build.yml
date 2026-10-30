@@ -44,6 +44,9 @@ jobs:
           cp "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/"
 
+      - name: Fetch the hand tracking model
+        run: sh tools/fetch_hand_model.sh
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

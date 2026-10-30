@@ -3,3 +3,4 @@ build/
 /horizon/
 app/src/main/jniLibs/
 local.properties
+app/src/main/assets/hand_landmarker.task

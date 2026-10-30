@@ -208,6 +208,8 @@ public class LauncherActivity extends Activity {
                 Settings.showFps(this), on -> { prefs.edit().putBoolean("show_fps", on).commit(); ExtrasFile.setFps(this, on); }, null));
         screen.addView(m.switchRow("VR (Cardboard)", "Два глаза рядом, гироскоп телефона поворачивает голову. Вставь телефон в шлем после запуска игры. Тонкая настройка: файл vr.txt (см. README)",
                 Settings.vr(this), on -> prefs.edit().putBoolean("vr", on).commit(), null));
+        screen.addView(m.switchRow("Трекинг рук (камера)", "Задняя камера видит руки: левая ходит (ладонь вперёд/назад/в стороны), кулак прыгает; правая: щипок бьёт, кулак использует, взмах в сторону листает слоты. Нужен шлем с окном под камеру. Первый раз спросит доступ к камере",
+                Settings.hands(this), on -> prefs.edit().putBoolean("hands", on).commit(), null));
         screen.addView(m.switchRow("Кнопки на экране в VR", "Выключено: экран чистый, управление только с клавиатуры, мыши или геймпада",
                 Settings.vrControls(this), on -> prefs.edit().putBoolean("vr_controls", on).commit(), null));
         screen.addView(m.plain("Камеры (для трекинга рук)", v -> new android.app.AlertDialog.Builder(this)

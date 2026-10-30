@@ -40,6 +40,11 @@ final class Settings {
         return prefs(c).getBoolean("vr", false);
     }
 
+    /** Hands from the back camera as the controller (HandTracker): left hand walks, right hand acts. */
+    static boolean hands(Context c) {
+        return prefs(c).getBoolean("hands", false);
+    }
+
     /** Keep the touch controls on the screen in VR (a viewer with a touch lever, or taking the phone out to try). */
     static boolean vrControls(Context c) {
         return prefs(c).getBoolean("vr_controls", true);

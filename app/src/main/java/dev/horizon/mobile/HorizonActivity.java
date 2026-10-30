@@ -54,6 +54,7 @@ public class HorizonActivity extends NativeActivity {
                 android.widget.Toast.makeText(this, "В телефоне нет датчика поворота: VR без гироскопа", android.widget.Toast.LENGTH_LONG).show();
             }
         }
+        if (Settings.hands(this)) hands = new HandTracker(this);
         try {
             // The overlay window cannot take the keyboard (it must not take the focus from the game), so a 1x1
             // view inside the game's own window does: it is what Gboard, Yandex Keyboard and the rest talk to.
@@ -66,7 +67,27 @@ public class HorizonActivity extends NativeActivity {
 
     private ImeView ime;
     private VrSensors vr;
+    private HandTracker hands;
     private boolean keyboardShown;
+    private static final int CAMERA_REQUEST = 41;
+
+    /** Starts hand tracking if the camera is allowed, asks for it once if not. */
+    private void startHands() {
+        if (hands == null) return;
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            hands.start();
+        } else {
+            requestPermissions(new String[] {android.Manifest.permission.CAMERA}, CAMERA_REQUEST);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code != CAMERA_REQUEST || hands == null) return;
+        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) hands.start();
+        else android.widget.Toast.makeText(this, "Без доступа к камере руки не отслеживаются", android.widget.Toast.LENGTH_LONG).show();
+    }
 
     /** Shows or hides the on-screen keyboard (any thread). */
     void setKeyboard(final boolean show) {
@@ -243,11 +264,13 @@ public class HorizonActivity extends NativeActivity {
     protected void onResume() {
         super.onResume();
         if (vr != null) vr.start();
+        startHands();
     }
 
     @Override
     protected void onPause() {
         if (vr != null) vr.stop();
+        if (hands != null) hands.stop();
         super.onPause();
     }
 

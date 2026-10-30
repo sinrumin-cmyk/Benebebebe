@@ -7,10 +7,17 @@ android {
         applicationId 'dev.horizon.mobile'
         minSdk 26
         targetSdk 33
-        versionCode 1500
-        versionName '15.0-vr'
+        versionCode 1510
+        versionName '15.1-hands'
         ndk { abiFilters 'arm64-v8a' }
     }
     packaging { jniLibs { useLegacyPackaging = true } }
+    // The hand model is read straight from the APK: keep it uncompressed.
+    androidResources { noCompress 'task' }
     buildTypes { release { minifyEnabled false } }
+}
+
+dependencies {
+    // Hand tracking (HandTracker.java). The model, assets/hand_landmarker.task, is fetched by the workflow / tools/fetch_hand_model.sh.
+    implementation 'com.google.mediapipe:tasks-vision:0.10.14'
 }
