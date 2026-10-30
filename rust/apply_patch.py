@@ -190,7 +190,13 @@ for marker, fn in (("const CORNERS = array<u32, 36>", fix_cull),
 # ---------------------------------------------------------------- phone VR (stereo, 3DoF)
 # See vr.rs. The renderer draws the frame once per eye into half-width textures and composites them with lens
 # distortion. Every anchor must match exactly once, or nothing is written for the file.
-render_src = root / "crates/horizon-client-render/src"
+# Upstream moved the renderer from horizon-client into horizon-client-render; find gfx.rs in whichever tree this is.
+_gfx = [f for f in sorted((root / "crates").glob("*/src/gfx.rs"))]
+if len(_gfx) != 1:
+    sys.exit(f"expected exactly one crates/*/src/gfx.rs, found {[str(f.relative_to(root)) for f in _gfx]}")
+render_src = _gfx[0].parent
+print("renderer lives in", render_src.relative_to(root))
+(render_src / "gfx").mkdir(exist_ok=True)
 shutil.copy(here / "vr.rs", render_src / "gfx/vr.rs")
 shutil.copy(here / "vr.wgsl", render_src / "gfx/vr.wgsl")
 
