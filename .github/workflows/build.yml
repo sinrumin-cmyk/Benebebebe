@@ -42,10 +42,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: horizon
           cache-on-failure: true
+
       - run: cargo install cargo-ndk --locked
 
       - name: Who pulls in arboard on Android? (diagnostic)
@@ -82,9 +84,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+
       - run: gradle assembleDebug --no-daemon
 
       - name: Check that every manifest class is inside the APK
