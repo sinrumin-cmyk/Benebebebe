@@ -24,6 +24,7 @@ public class LauncherActivity extends Activity {
     private TextView status, importState, distLabel, accountLabel, layoutLabel;
     private EditText world, nick;
     private SeekBar dist;
+    private LinearLayout modeRow;
     private Switch startInWorld, creativeSwitch;
     private float dp;
 
@@ -208,14 +209,28 @@ public class LauncherActivity extends Activity {
                 Settings.showFps(this), on -> { prefs.edit().putBoolean("show_fps", on).commit(); ExtrasFile.setFps(this, on); }, null));
         screen.addView(m.switchRow("VR (Cardboard)", "Два глаза рядом, гироскоп телефона поворачивает голову. Вставь телефон в шлем после запуска игры. Тонкая настройка: файл vr.txt (см. README)",
                 Settings.vr(this), on -> prefs.edit().putBoolean("vr", on).commit(), null));
-        screen.addView(m.switchRow("Трекинг рук (камера)", "Задняя камера видит руки: левая ходит (ладонь вперёд/назад/в стороны), кулак прыгает; правая: щипок бьёт, кулак использует, взмах в сторону листает слоты. Нужен шлем с окном под камеру. Первый раз спросит доступ к камере",
-                Settings.hands(this), on -> prefs.edit().putBoolean("hands", on).commit(), null));
         screen.addView(m.switchRow("Кнопки на экране в VR", "Выключено: экран чистый, управление только с клавиатуры, мыши или геймпада",
                 Settings.vrControls(this), on -> prefs.edit().putBoolean("vr_controls", on).commit(), null));
         screen.addView(m.plain("Камеры (для трекинга рук)", v -> new android.app.AlertDialog.Builder(this)
                 .setTitle("Камеры").setMessage(CameraInfo.dump(this)).setPositiveButton("Ок", null).show()), m.buttonParams(4, 44));
         root.addView(screen, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(screen, n++);
+
+        // ---- how the game is controlled: hands, gamepad, both. The VR menu changes the same setting.
+        LinearLayout input = m.card("Ввод: руки и геймпад", "🎮");
+        input.addView(m.text("Руки: задняя камера. Левая ходит (ладонь вперёд, назад, в стороны), кулак прыгает; правая: щипок бьёт, "
+                + "кулак использует, взмах в сторону листает слоты. Нужен шлем с окном под камеру, при первом запуске спросит доступ к камере. "
+                + "Геймпад: любой Bluetooth/USB, кнопки как в консольном Minecraft. Смешанный режим: что нажато хоть где, то и работает.",
+                Md3.BODY, m.onVariant));
+        modeRow = m.row();
+        HorizontalScrollView modeScroll = new HorizontalScrollView(this);
+        modeScroll.setHorizontalScrollBarEnabled(false);
+        modeScroll.addView(modeRow);
+        input.addView(modeScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(40), 12));
+        refreshModes();
+        input.addView(m.tonal("Открыть VR-меню (руки / геймпад)", v -> startActivity(new Intent(this, VrMenuActivity.class))), m.buttonParams(12, 48));
+        root.addView(input, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(input, n++);
 
         // ---- account
         LinearLayout account = m.card("Аккаунт", "👤");
@@ -256,6 +271,21 @@ public class LauncherActivity extends Activity {
         });
         setContentView(scroll);
         refreshPlay();
+    }
+
+    private void refreshModes() {
+        modeRow.removeAllViews();
+        int current = Settings.inputMode(this);
+        for (int mode = Settings.MODE_HANDS; mode <= Settings.MODE_PAD; mode++) {
+            final int mm = mode;
+            TextView chip = m.chip(Settings.inputModeName(mode), mode == current, v -> {
+                prefs.edit().putInt("input_mode", mm).commit();
+                refreshModes();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(40));
+            lp.rightMargin = px(8);
+            modeRow.addView(chip, lp);
+        }
     }
 
     private TextView scaleChip(int value) {
@@ -361,76 +391,8 @@ public class LauncherActivity extends Activity {
     }
 
     private void play() {
-        if (!Dirs.hasResources(this)) {
-            Toast.makeText(this, "Сначала импортируй файлы игры", Toast.LENGTH_LONG).show();
-            return;
-        }
         saveSettings();
-        final boolean direct = startInWorld.isChecked();
-        final boolean gestures = Settings.touchGestures(this);
-        final List<String> a = new ArrayList<>();
-        a.add("--resources"); a.add(Dirs.resources(this).getAbsolutePath());
-        a.add("--render-distance"); a.add(String.valueOf(dist.getProgress() + 2));
-        // No --world: the game opens Horizon's own main menu (worlds, servers, options).
-        String w = world.getText().toString().trim();
-        if (direct && !w.isEmpty()) {
-            a.add("--world"); a.add(w);
-            if (creativeSwitch.isChecked()) a.add("--creative");
-        }
-        final String offlineNick = nick.getText().toString().trim();
-
-        new Thread(() -> {
-            File home = Dirs.home(this);
-            File env = new File(home, "game-env.txt"), session = new File(home, "session.json");
-            env.delete();
-            session.delete();
-            ExtrasFile.setFps(this, Settings.showFps(this));
-            final StringBuilder envText = new StringBuilder();
-            if (gestures) envText.append("HORIZON_TOUCH_GESTURES=1\n");
-            if (Settings.vr(this)) {
-                envText.append("HORIZON_VR=1\n");
-                // vr.txt next to game-env.txt: HORIZON_VR_IPD=0.064, HORIZON_VR_FOV=90, HORIZON_VR_K1=0.441, HORIZON_VR_K2=0.156
-                File tune = new File(home, "vr.txt");
-                if (tune.isFile()) {
-                    try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(tune))) {
-                        for (String line; (line = r.readLine()) != null; ) {
-                            line = line.trim();
-                            if (line.startsWith("HORIZON_VR_") && line.indexOf('=') > 0) envText.append(line).append('\n');
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            }
-            String warning = null;
-            boolean signed = false;
-            if (Ely.signedIn(prefs)) {
-                try {
-                    Ely.refresh(prefs);
-                    Ely.writeSession(prefs, session);          // the game reads it within two minutes, then deletes it
-                    a.add("--session-file"); a.add(session.getAbsolutePath());
-                    envText.append("HORIZON_JOIN_URL=").append(Ely.JOIN_URL).append('\n');
-                    signed = true;
-                } catch (Throwable e) {
-                    warning = "Ely.by: " + e.getMessage() + ". Играю офлайн, войди заново.";
-                }
-            }
-            if (!signed && !offlineNick.isEmpty()) { a.add("--name"); a.add(offlineNick); }
-            try {
-                if (envText.length() > 0) try (FileWriter f = new FileWriter(env)) { f.write(envText.toString()); }
-                try (FileWriter f = new FileWriter(new File(home, "game-args.txt"))) {
-                    f.write(String.join("\n", a));
-                }
-            } catch (Throwable e) {
-                final String msg = "Не записал аргументы: " + e;
-                runOnUiThread(() -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show());
-                return;
-            }
-            final String warn = warning;
-            runOnUiThread(() -> {
-                if (warn != null) Toast.makeText(this, warn, Toast.LENGTH_LONG).show();
-                prefs.edit().putLong("last_launch", System.currentTimeMillis()).commit();
-                startActivity(new Intent(this, HorizonActivity.class));
-            });
-        }, "play").start();
+        Launch.play(this);
     }
 
     private void refreshLayout() {

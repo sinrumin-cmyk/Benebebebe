@@ -21,6 +21,21 @@
             </intent-filter>
         </activity>
 
+        <!-- VR menu: a stereo, lens-distorted menu for a phone in a viewer. A second icon, "Horizon VR", opens it directly
+             (a gamepad or the hands drive it). Same process as the launcher: it only starts the game, it does not run it. -->
+        <activity
+            android:name=".VrMenuActivity"
+            android:label="Horizon VR"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".LogActivity"
             android:exported="false"

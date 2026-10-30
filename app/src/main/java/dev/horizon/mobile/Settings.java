@@ -40,9 +40,28 @@ final class Settings {
         return prefs(c).getBoolean("vr", false);
     }
 
-    /** Hands from the back camera as the controller (HandTracker): left hand walks, right hand acts. */
+    /** How the game is controlled besides the touch screen: 1 hands only, 2 hands and gamepad, 3 gamepad only. */
+    static final int MODE_HANDS = 1, MODE_MIXED = 2, MODE_PAD = 3;
+
+    static int inputMode(Context c) {
+        int m = prefs(c).getInt("input_mode", MODE_PAD);
+        return m < MODE_HANDS || m > MODE_PAD ? MODE_PAD : m;
+    }
+
+    static String inputModeName(int mode) {
+        return mode == MODE_HANDS ? "Только руки" : mode == MODE_MIXED ? "Руки + геймпад" : "Только геймпад";
+    }
+
+    /** Hands from the back camera are a controller (HandTracker): left hand walks, right hand acts. */
     static boolean hands(Context c) {
-        return prefs(c).getBoolean("hands", false);
+        int m = inputMode(c);
+        return m == MODE_HANDS || m == MODE_MIXED;
+    }
+
+    /** A hardware gamepad is a controller (GamepadInput). In hands-only mode its buttons are ignored. */
+    static boolean pad(Context c) {
+        int m = inputMode(c);
+        return m == MODE_PAD || m == MODE_MIXED;
     }
 
     /** Keep the touch controls on the screen in VR (a viewer with a touch lever, or taking the phone out to try). */

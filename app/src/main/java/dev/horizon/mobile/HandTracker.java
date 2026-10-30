@@ -73,7 +73,17 @@ final class HandTracker {
     private static final long SWEEP_WINDOW_MS = 300, SWEEP_COOLDOWN_MS = 450;
     private static final float SWEEP_DISTANCE = 0.22f;
 
+    /** Where the gestures go: gamepad calls in the game, a cursor and clicks in the VR menu. */
+    interface Output {
+        void button(int index, boolean down);
+        /** The left stick, up positive. */
+        void stick(float x, float y);
+        /** The right hand's palm in the picture (0..1, not mirrored), or not there. */
+        void pointer(boolean present, float x, float y);
+    }
+
     private final Activity activity;
+    private final Output out;
     private final HandlerThread thread = new HandlerThread("horizon-hands");
     private Handler handler;
     private CameraDevice camera;
@@ -98,8 +108,9 @@ final class HandTracker {
     private long lastSweep;
     private final ArrayDeque<double[]> sweep = new ArrayDeque<>(); // {time, x}
 
-    HandTracker(Activity activity) {
+    HandTracker(Activity activity, Output out) {
         this.activity = activity;
+        this.out = out;
     }
 
     /** Opens the camera and the model. Needs the CAMERA permission. Safe to call again after stop(). */
@@ -397,11 +408,13 @@ final class HandTracker {
             setButton(HorizonInput.RT, right.state == PINCH);
             setButton(HorizonInput.LT, right.state == FIST);
             sweeps(rh, now);
+            out.pointer(true, rh.cx, rh.cy);
         } else if (now - rightSeen > LOST_MS) {
             right.reset();
             setButton(HorizonInput.RT, false);
             setButton(HorizonInput.LT, false);
             sweep.clear();
+            out.pointer(false, 0, 0);
         }
     }
 
@@ -438,7 +451,7 @@ final class HandTracker {
 
     private void moveStick(float x, float y) {
         if (x == 0 && y == 0) { stickX = 0; stickY = 0; }
-        HorizonInput.nativeStick(false, x, y);
+        out.stick(x, y);
         boolean run = Math.hypot(x, y) > 0.95 && y > 0.7;    // pushed to the far edge: sprint, as the on-screen stick does
         if (run != sprint) { sprint = run; setButton(HorizonInput.LSTICK, run); }
     }
@@ -463,10 +476,11 @@ final class HandTracker {
     private void setButton(int button, boolean on) {
         if (down[button] == on) return;
         down[button] = on;
-        HorizonInput.nativeButton(button, on);
+        out.button(button, on);
     }
 
     private void releaseAll() {
+        out.pointer(false, 0, 0);
         moveStick(0, 0);
         for (int i = 0; i < down.length; i++) setButton(i, false);
         leftActive = false;

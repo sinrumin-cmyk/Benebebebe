@@ -54,7 +54,10 @@ public class HorizonActivity extends NativeActivity {
                 android.widget.Toast.makeText(this, "В телефоне нет датчика поворота: VR без гироскопа", android.widget.Toast.LENGTH_LONG).show();
             }
         }
-        if (Settings.hands(this)) hands = new HandTracker(this);
+        // Input modes (launcher / VR menu): 1 hands only, 2 hands + gamepad, 3 gamepad only. The mux merges the sources.
+        mux = new InputMux(InputMux.GAME);
+        if (Settings.pad(this)) pad = new GamepadInput(mux);
+        if (Settings.hands(this)) hands = new HandTracker(this, mux.source(InputMux.HANDS));
         try {
             // The overlay window cannot take the keyboard (it must not take the focus from the game), so a 1x1
             // view inside the game's own window does: it is what Gboard, Yandex Keyboard and the rest talk to.
@@ -68,6 +71,8 @@ public class HorizonActivity extends NativeActivity {
     private ImeView ime;
     private VrSensors vr;
     private HandTracker hands;
+    private InputMux mux;
+    private GamepadInput pad;
     private boolean keyboardShown;
     private static final int CAMERA_REQUEST = 41;
 
@@ -271,7 +276,30 @@ public class HorizonActivity extends NativeActivity {
     protected void onPause() {
         if (vr != null) vr.stop();
         if (hands != null) hands.stop();
+        if (pad != null) pad.release();
         super.onPause();
+    }
+
+    /**
+     * A gamepad's buttons and sticks never reach the native game by themselves: they go to the virtual pad here. With
+     * the gamepad off (hands-only mode) they are swallowed, so a pad lying around does nothing.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (GamepadInput.isPadKey(e)) {
+            if (pad != null) pad.onKey(e);
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(android.view.MotionEvent e) {
+        if (GamepadInput.isPadMotion(e)) {
+            if (pad != null) pad.onMotion(e);
+            return true;
+        }
+        return super.dispatchGenericMotionEvent(e);
     }
 
     @Override
