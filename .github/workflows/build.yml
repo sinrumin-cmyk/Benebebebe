@@ -18,8 +18,26 @@ jobs:
       - name: Get Horizon and apply the Android patch
         run: |
           git clone https://github.com/ludovic111/horizon horizon
-          git -C horizon checkout "${{ github.event.inputs.horizon_ref || 'main' }}"
-          python3 rust/apply_patch.py horizon
+          ref="${{ github.event.inputs.horizon_ref || 'main' }}"
+          git -C horizon checkout --quiet "$ref"
+          if ! python3 rust/apply_patch.py horizon; then
+            # Upstream moved on and an anchor of the patch is gone. Walk back through its history to the newest
+            # commit the patch still fits, so the build keeps working (and says which commit it used).
+            echo "::warning::The Android patch does not fit $ref; looking for the newest earlier commit it fits"
+            found=""
+            for sha in $(git -C horizon rev-list --first-parent -n 300 "$ref" | tail -n +2); do
+              git -C horizon reset --hard --quiet
+              git -C horizon clean -fdxq
+              git -C horizon checkout --quiet "$sha"
+              if python3 rust/apply_patch.py horizon > /dev/null 2>&1; then found="$sha"; break; fi
+            done
+            if [ -z "$found" ]; then
+              echo "::error::The patch fits none of the last 300 commits of $ref"
+              exit 1
+            fi
+            echo "::warning::Built from upstream commit $found (the patch does not fit newer ones: see the anchor error above)"
+          fi
+          git -C horizon log -1 --format='Horizon commit: %H %s'
 
       - uses: dtolnay/rust-toolchain@stable
         with:

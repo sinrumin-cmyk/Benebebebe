@@ -10,6 +10,14 @@ client = root / "crates/horizon-client"
 def edit(path, pairs):
     text = path.read_text()
     for old, new in pairs:
+        if old == "@either":   # upstream changed the code at this spot over time: any one of the listed forms, exactly once
+            for alt_old, alt_new in new:
+                if text.count(alt_old) == 1:
+                    text = text.replace(alt_old, alt_new)
+                    break
+            else:
+                sys.exit(f"{path}: none of the anchors matched exactly once:\n" + "\n---\n".join(o for o, _ in new))
+            continue
         n = text.count(old)
         if n != 1:
             sys.exit(f"{path}: anchor matched {n}x (need 1):\n{old}")
@@ -34,7 +42,10 @@ edit(client / "src/lib.rs", [(
 
 edit(client / "src/game.rs", [
     ("mod clipboard;\n", "mod clipboard;\nmod touch;\n"),
-    ("let mut args = std::env::args().skip(1);", "let mut args = horizon_client::platform::args().into_iter();"),
+    ("@either", [
+        ("let mut args = std::env::args().skip(1);", "let mut args = horizon_client::platform::args().into_iter();"),
+        ("Self::parse(std::env::args().skip(1))", "Self::parse(horizon_client::platform::args().into_iter())"),
+    ]),
     ("EventLoop::new()?.run_app(&mut game)", "horizon_client::platform::event_loop()?.run_app(&mut game)"),
     ("EventLoop::new()?.run_app(&mut app)", "horizon_client::platform::event_loop()?.run_app(&mut app)"),
     ("                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))\n                .is_ok();",
