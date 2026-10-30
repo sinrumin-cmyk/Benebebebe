@@ -52,6 +52,16 @@ final class Settings {
         return mode == MODE_HANDS ? "Только руки" : mode == MODE_MIXED ? "Руки + геймпад" : "Только геймпад";
     }
 
+    /** What is drawn of the tracked hands over the game: 0 nothing, 1 a window with the skeleton, 2 virtual hands that move like the real ones. */
+    static int handVis(Context c) {
+        int v = prefs(c).getInt("hand_vis", 0);
+        return v < 0 || v > 2 ? 0 : v;
+    }
+
+    static String handVisName(int v) {
+        return v == 1 ? "Окошко со скелетом" : v == 2 ? "Руки в сцене" : "Выкл";
+    }
+
     /** Hands from the back camera are a controller (HandTracker): left hand walks, right hand acts. */
     static boolean hands(Context c) {
         int m = inputMode(c);

@@ -24,7 +24,7 @@ public class LauncherActivity extends Activity {
     private TextView status, importState, distLabel, accountLabel, layoutLabel;
     private EditText world, nick;
     private SeekBar dist;
-    private LinearLayout modeRow;
+    private LinearLayout modeRow, visRow;
     private Switch startInWorld, creativeSwitch;
     private float dp;
 
@@ -228,6 +228,14 @@ public class LauncherActivity extends Activity {
         modeScroll.addView(modeRow);
         input.addView(modeScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(40), 12));
         refreshModes();
+        input.addView(m.text("Показ рук: «Руки в сцене» рисует поверх игры руки, повторяющие настоящие (по суставам, глубина по размеру ладони); "
+                + "«Окошко» — скелет и зона левой руки для настройки.", Md3.BODY, m.onVariant), m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 12));
+        visRow = m.row();
+        HorizontalScrollView visScroll = new HorizontalScrollView(this);
+        visScroll.setHorizontalScrollBarEnabled(false);
+        visScroll.addView(visRow);
+        input.addView(visScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(40), 8));
+        refreshVis();
         input.addView(m.tonal("Открыть VR-меню (руки / геймпад)", v -> startActivity(new Intent(this, VrMenuActivity.class))), m.buttonParams(12, 48));
         root.addView(input, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(input, n++);
@@ -271,6 +279,21 @@ public class LauncherActivity extends Activity {
         });
         setContentView(scroll);
         refreshPlay();
+    }
+
+    private void refreshVis() {
+        visRow.removeAllViews();
+        int current = Settings.handVis(this);
+        for (int v = 0; v <= 2; v++) {
+            final int vv = v;
+            TextView chip = m.chip(Settings.handVisName(v), v == current, x -> {
+                prefs.edit().putInt("hand_vis", vv).commit();
+                refreshVis();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(40));
+            lp.rightMargin = px(8);
+            visRow.addView(chip, lp);
+        }
     }
 
     private void refreshModes() {

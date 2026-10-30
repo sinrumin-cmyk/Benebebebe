@@ -57,7 +57,18 @@ public class HorizonActivity extends NativeActivity {
         // Input modes (launcher / VR menu): 1 hands only, 2 hands + gamepad, 3 gamepad only. The mux merges the sources.
         mux = new InputMux(InputMux.GAME);
         if (Settings.pad(this)) pad = new GamepadInput(mux);
-        if (Settings.hands(this)) hands = new HandTracker(this, mux.source(InputMux.HANDS));
+        if (Settings.hands(this)) {
+            final InputMux.Source handSource = mux.source(InputMux.HANDS);
+            hands = new HandTracker(this, new HandTracker.Output() {
+                @Override public void button(int index, boolean down) { handSource.button(index, down); }
+                @Override public void stick(float x, float y) { handSource.stick(x, y); }
+                @Override public void pointer(boolean present, float x, float y) {}
+                @Override public void frame(HandFrame f) {
+                    HandOverlay v = handView;
+                    if (v != null) v.setFrame(f);
+                }
+            });
+        }
         try {
             // The overlay window cannot take the keyboard (it must not take the focus from the game), so a 1x1
             // view inside the game's own window does: it is what Gboard, Yandex Keyboard and the rest talk to.
@@ -223,6 +234,7 @@ public class HorizonActivity extends NativeActivity {
     }
 
     private View overlay;
+    private volatile HandOverlay handView;
 
     /**
      * NativeActivity takes the window's surface, so views added to its own window are never drawn
@@ -231,6 +243,7 @@ public class HorizonActivity extends NativeActivity {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
+        addHandOverlay();
         if (overlay != null || (Settings.vr(this) && !Settings.vrControls(this))) return;
         try {
             overlay = LayoutStore.createOverlay(this);
@@ -302,6 +315,36 @@ public class HorizonActivity extends NativeActivity {
         return super.dispatchGenericMotionEvent(e);
     }
 
+    /** The hand visualizer: a window above the game that lets every touch through (see HandOverlay). */
+    private void addHandOverlay() {
+        int vis = Settings.handVis(this);
+        if (hands == null || vis == 0 || handView != null) return;
+        try {
+            HandOverlay v = new HandOverlay(this, Settings.vr(this), vis);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                            | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            lp.token = getWindow().getDecorView().getWindowToken();
+            lp.gravity = Gravity.TOP | Gravity.START;
+            if (Build.VERSION.SDK_INT >= 28) {
+                lp.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30
+                        ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                        : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+            getWindowManager().addView(v, lp);
+            handView = v;
+        } catch (Throwable e) {
+            handView = null;
+        }
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -310,6 +353,7 @@ public class HorizonActivity extends NativeActivity {
 
     @Override
     protected void onDestroy() {
+        try { if (handView != null) getWindowManager().removeViewImmediate(handView); } catch (Throwable ignored) {}
         try { if (overlay != null) getWindowManager().removeViewImmediate(overlay); } catch (Throwable ignored) {}
         super.onDestroy();
         // android_main can only run once per process: leave the :game process so the next Play starts clean.

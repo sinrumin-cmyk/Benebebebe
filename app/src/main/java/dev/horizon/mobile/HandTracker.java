@@ -80,6 +80,8 @@ final class HandTracker {
         void stick(float x, float y);
         /** The right hand's palm in the picture (0..1, not mirrored), or not there. */
         void pointer(boolean present, float x, float y);
+        /** Every camera frame: both hands' landmarks, for drawing them. */
+        default void frame(HandFrame f) {}
     }
 
     private final Activity activity;
@@ -345,12 +347,18 @@ final class HandTracker {
         float cx, cy;        // palm centre
         int raw;             // OPEN, PINCH or FIST
         float pinchRatio;
+        final float[] pts = new float[63];   // x y z of the 21 landmarks
     }
 
     private Hand analyse(List<NormalizedLandmark> l, int w, int h, boolean wasPinch) {
         Hand hand = new Hand();
         int[] palm = {WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_MCP};
         for (int i : palm) { hand.cx += l.get(i).x(); hand.cy += l.get(i).y(); }
+        for (int i = 0; i < 21; i++) {
+            hand.pts[3 * i] = l.get(i).x();
+            hand.pts[3 * i + 1] = l.get(i).y();
+            hand.pts[3 * i + 2] = l.get(i).z();
+        }
         hand.cx /= palm.length;
         hand.cy /= palm.length;
         float size = dist(l, WRIST, MIDDLE_MCP, w, h);
@@ -416,6 +424,20 @@ final class HandTracker {
             sweep.clear();
             out.pointer(false, 0, 0);
         }
+        publish(lh, rh, w, h);
+    }
+
+    private void publish(Hand lh, Hand rh, int w, int h) {
+        HandFrame fr = new HandFrame();
+        fr.aspect = (float) w / h;
+        if (lh != null) { fr.present[HandFrame.LEFT] = true; System.arraycopy(lh.pts, 0, fr.pts[HandFrame.LEFT], 0, 63); fr.state[HandFrame.LEFT] = left.state; }
+        if (rh != null) { fr.present[HandFrame.RIGHT] = true; System.arraycopy(rh.pts, 0, fr.pts[HandFrame.RIGHT], 0, 63); fr.state[HandFrame.RIGHT] = right.state; }
+        fr.leftActive = leftActive && lh != null;
+        fr.neutralX = neutralX;
+        fr.neutralY = neutralY;
+        fr.rangeX = STICK_RANGE;
+        fr.rangeY = STICK_RANGE * w / h;
+        out.frame(fr);
     }
 
     /** A gesture must be seen on two frames in a row before it counts: one bad frame does not click. */
@@ -481,6 +503,7 @@ final class HandTracker {
 
     private void releaseAll() {
         out.pointer(false, 0, 0);
+        out.frame(new HandFrame());
         moveStick(0, 0);
         for (int i = 0; i < down.length; i++) setButton(i, false);
         leftActive = false;

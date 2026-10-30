@@ -54,6 +54,8 @@ public class VrMenuActivity extends Activity {
     private boolean pointerShown;
     private float pointerX, pointerY;     // 0..1 across the panel
     private long lastNav;
+    private volatile HandFrame lastFrame;
+    private final HandRender handRender = new HandRender();
     private MenuView view;
     private HandTracker hands;
     private float k1 = 0.441f, k2 = 0.156f;
@@ -86,6 +88,9 @@ public class VrMenuActivity extends Activity {
         items.add(new Item("VR в игре",
                 () -> Settings.vr(this) ? "включено" : "выключено",
                 () -> toggleVr(), d -> toggleVr()));
+        items.add(new Item("Показ рук",
+                () -> Settings.handVisName(Settings.handVis(this)),
+                () -> cycleVis(1), d -> cycleVis(d)));
         items.add(new Item("Выход", () -> "", () -> finish(), null));
 
         view = new MenuView();
@@ -109,23 +114,19 @@ public class VrMenuActivity extends Activity {
         }
     }
 
+    private void cycleVis(int d) {
+        int v = ((Settings.handVis(this) + d) % 3 + 3) % 3;
+        Settings.prefs(this).edit().putInt("hand_vis", v).commit();
+    }
+
     private void toggleVr() {
         Settings.prefs(this).edit().putBoolean("vr", !Settings.vr(this)).commit();
     }
 
-    /** K1 and K2 as the game will read them (vr.txt next to game-env.txt), so the menu bends like the game does. */
     private void readLens() {
-        File f = new File(Dirs.home(this), "vr.txt");
-        if (!f.isFile()) return;
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
-            for (String line; (line = r.readLine()) != null; ) {
-                line = line.trim();
-                try {
-                    if (line.startsWith("HORIZON_VR_K1=")) k1 = Float.parseFloat(line.substring(14).trim());
-                    if (line.startsWith("HORIZON_VR_K2=")) k2 = Float.parseFloat(line.substring(14).trim());
-                } catch (NumberFormatException ignored) {}
-            }
-        } catch (Throwable ignored) {}
+        float[] k = LensMesh.readLens(this);
+        k1 = k[0];
+        k2 = k[1];
     }
 
     // ------------------------------------------------------------------ navigation
@@ -211,6 +212,11 @@ public class VrMenuActivity extends Activity {
             else if (y < -0.8f) { lastStick = now; runOnUiThread(() -> move(1)); }
         }
 
+        @Override public void frame(HandFrame f) {
+            lastFrame = f;
+            if (Settings.handVis(VrMenuActivity.this) != 0) runOnUiThread(() -> view.invalidate());
+        }
+
         @Override public void pointer(boolean present, float x, float y) {
             runOnUiThread(() -> {
                 if (!present) { pointerShown = false; hover = -1; view.invalidate(); return; }
@@ -273,7 +279,7 @@ public class VrMenuActivity extends Activity {
 
     private final class MenuView extends View {
         private static final int GRID = 16;
-        private static final int TOP = 190, STEP = 96, HEIGHT = 80, LEFT = 100, RIGHT = PANEL_W - 100;
+        private static final int TOP = 170, STEP = 80, HEIGHT = 66, LEFT = 100, RIGHT = PANEL_W - 100;
 
         private final Bitmap panel = Bitmap.createBitmap(PANEL_W, PANEL_H, Bitmap.Config.ARGB_8888);
         private final Canvas pc = new Canvas(panel);
@@ -316,15 +322,15 @@ public class VrMenuActivity extends Activity {
                 paint.setColor(i == selected ? 0xFF2F6FE4 : 0xFF212833);
                 pc.drawRoundRect(rect, 28, 28, paint);
                 paint.setColor(Color.WHITE);
-                paint.setTextSize(42);
+                paint.setTextSize(38);
                 paint.setTextAlign(Paint.Align.LEFT);
-                pc.drawText(it.label, LEFT + 36, top + 54, paint);
+                pc.drawText(it.label, LEFT + 36, top + 46, paint);
                 String v = it.value.get();
                 if (!v.isEmpty()) {
                     paint.setTextAlign(Paint.Align.RIGHT);
                     paint.setColor(i == selected ? Color.WHITE : 0xFFB5C0CE);
-                    paint.setTextSize(36);
-                    pc.drawText(it.adjust != null ? "<  " + v + "  >" : v, RIGHT - 36, top + 52, paint);
+                    paint.setTextSize(34);
+                    pc.drawText(it.adjust != null ? "<  " + v + "  >" : v, RIGHT - 36, top + 44, paint);
                 }
             }
 
@@ -333,8 +339,13 @@ public class VrMenuActivity extends Activity {
             paint.setTextSize(28);
             String pad = GamepadInput.connected() ? "есть" : "нет";
             String hand = Settings.hands(VrMenuActivity.this) ? "камера" : "выкл";
-            pc.drawText("Геймпад: " + pad + "     Руки: " + hand, LEFT, PANEL_H - 56, paint);
+            pc.drawText("Геймпад: " + pad + "     Руки: " + hand, LEFT, PANEL_H - 50, paint);
             pc.drawText("D-pad / стик, A — выбрать, B — назад.  Руки: ладонь двигает, щипок — выбрать, взмах — менять", LEFT, PANEL_H - 22, paint);
+
+            HandFrame hf = lastFrame;
+            if (hf != null && hands != null && Settings.handVis(VrMenuActivity.this) != 0) {
+                handRender.debug(pc, hf, RIGHT - 200, 14, 200, 150);   // the camera's view of the hands, to see they are found
+            }
 
             if (pointerShown) {
                 paint.setColor(0xFFFFD54F);
@@ -344,40 +355,13 @@ public class VrMenuActivity extends Activity {
             }
         }
 
-        /**
-         * Where the panel's grid points land on the screen. The game's shader finds, for every screen point p, the
-         * eye image point q = p * (1 + k1 r^2 + k2 r^4) * scale (r = |p|, x stretched by the aspect); here the panel
-         * point q is given, so p is found by bisection on the radius.
-         */
+        /** Where the panel's grid points land on the screen: the game's lens distortion applied to a flat panel (see LensMesh). */
         private float[] buildMesh(int eye, int w, int h) {
             final float eyeW = w / 2f, eyeH = h;
             float pw = eyeW * 0.80f, ph = pw * PANEL_H / PANEL_W;
             if (ph > eyeH * 0.85f) { ph = eyeH * 0.85f; pw = ph * PANEL_W / PANEL_H; }
             final float shift = (eye == 0 ? 1 : -1) * 0.010f * eyeW;    // a little parallax: the panel floats in front
-            final float asp = eyeW / eyeH;
-            final float scale = 1f / Math.max(0.1f, 1f + k1 + k2);
-            float[] v = new float[(GRID + 1) * (GRID + 1) * 2];
-            int k = 0;
-            for (int j = 0; j <= GRID; j++) {
-                for (int i = 0; i <= GRID; i++) {
-                    float px = eyeW / 2 + (i / (float) GRID - 0.5f) * pw + shift;
-                    float py = eyeH / 2 + (j / (float) GRID - 0.5f) * ph;
-                    float qx = (px - eyeW / 2) / (eyeW / 2) * asp, qy = (py - eyeH / 2) / (eyeH / 2);
-                    float rs = (float) Math.hypot(qx, qy);
-                    float f = 1f;
-                    if (rs > 1e-6f) {
-                        float lo = 0f, hi = 2f;
-                        for (int n = 0; n < 32; n++) {
-                            float mid = 0.5f * (lo + hi), r2 = mid * mid;
-                            if (mid * (1f + k1 * r2 + k2 * r2 * r2) * scale < rs) lo = mid; else hi = mid;
-                        }
-                        f = 0.5f * (lo + hi) / rs;
-                    }
-                    v[k++] = eye * eyeW + eyeW / 2 * (1f + qx * f / asp);
-                    v[k++] = eyeH / 2 * (1f + qy * f);
-                }
-            }
-            return v;
+            return LensMesh.build(eye, w, h, (eyeW - pw) / 2f + shift, (eyeH - ph) / 2f, pw, ph, k1, k2, GRID);
         }
 
         @Override
