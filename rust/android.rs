@@ -98,6 +98,19 @@ pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeButton(
     }
 }
 
+/// The head's orientation for phone VR, degrees: yaw grows turning right, pitch is positive looking down,
+/// roll is positive tilting the head right (`VrSensors.java` computes them from the rotation sensor).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeHead(
+    _env: JNIEnv,
+    _class: JClass,
+    yaw: jfloat,
+    pitch: jfloat,
+    roll: jfloat,
+) {
+    crate::gfx::vr::set_head(yaw, pitch, roll);
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeStick(
     _env: JNIEnv,

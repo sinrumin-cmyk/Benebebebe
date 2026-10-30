@@ -72,6 +72,15 @@ impl Game<'_> {
 
     pub(super) fn apply_touch_input(&mut self, event_loop: &ActiveEventLoop) {
         touch_input::tick();
+        // Phone VR: the head's turn is the camera's turn. The change is taken on every loop so it never
+        // piles up, and applied only while playing, so a menu does not spin the world behind it.
+        if horizon_client::gfx::vr::enabled() {
+            let (yaw, pitch) = horizon_client::gfx::vr::take_head_delta();
+            if self.screen == Screen::Playing && self.player.is_some() {
+                self.yaw += yaw;
+                self.pitch = (self.pitch + pitch).clamp(-90.0, 90.0);
+            }
+        }
         let Some(window) = self.window.clone() else {
             return;
         };

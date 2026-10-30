@@ -47,6 +47,13 @@ public class HorizonActivity extends NativeActivity {
 
         super.onCreate(state);
         hideSystemUi();
+        if (Settings.vr(this)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            vr = new VrSensors(this);
+            if (!vr.available()) {
+                android.widget.Toast.makeText(this, "В телефоне нет датчика поворота: VR без гироскопа", android.widget.Toast.LENGTH_LONG).show();
+            }
+        }
         try {
             // The overlay window cannot take the keyboard (it must not take the focus from the game), so a 1x1
             // view inside the game's own window does: it is what Gboard, Yandex Keyboard and the rest talk to.
@@ -58,6 +65,7 @@ public class HorizonActivity extends NativeActivity {
     }
 
     private ImeView ime;
+    private VrSensors vr;
     private boolean keyboardShown;
 
     /** Shows or hides the on-screen keyboard (any thread). */
@@ -197,7 +205,7 @@ public class HorizonActivity extends NativeActivity {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (overlay != null) return;
+        if (overlay != null || (Settings.vr(this) && !Settings.vrControls(this))) return;
         try {
             overlay = LayoutStore.createOverlay(this);
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -229,6 +237,18 @@ public class HorizonActivity extends NativeActivity {
                 try (FileWriter w = new FileWriter(f)) { w.write(new java.util.Date() + "\ncontrol overlay\n" + sw); }
             } catch (Throwable ignored) {}
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (vr != null) vr.start();
+    }
+
+    @Override
+    protected void onPause() {
+        if (vr != null) vr.stop();
+        super.onPause();
     }
 
     @Override

@@ -28,6 +28,8 @@ public final class HorizonInput {
     public static native long nativeFrames();
     /** True while a text field has the focus in the game. */
     public static native boolean nativeWantsText();
+    /** Phone VR: the head's orientation in degrees (yaw right-positive, pitch down-positive, roll right-positive). */
+    public static native void nativeHead(float yaw, float pitch, float roll);
     /** The cursor to draw: x in the high 32 bits, y in the low ones; -1 for none. */
     public static native long nativeCursor();
 }

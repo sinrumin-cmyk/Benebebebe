@@ -206,6 +206,12 @@ public class LauncherActivity extends Activity {
         LinearLayout screen = m.card("Экран", "📈");
         screen.addView(m.switchRow("Счётчик FPS", "Счётчик самой игры, в углу экрана. Тоже включается в игре: Options → Horizon Settings → Extras",
                 Settings.showFps(this), on -> { prefs.edit().putBoolean("show_fps", on).commit(); ExtrasFile.setFps(this, on); }, null));
+        screen.addView(m.switchRow("VR (Cardboard)", "Два глаза рядом, гироскоп телефона поворачивает голову. Вставь телефон в шлем после запуска игры. Тонкая настройка: файл vr.txt (см. README)",
+                Settings.vr(this), on -> prefs.edit().putBoolean("vr", on).commit(), null));
+        screen.addView(m.switchRow("Кнопки на экране в VR", "Выключено: экран чистый, управление только с клавиатуры, мыши или геймпада",
+                Settings.vrControls(this), on -> prefs.edit().putBoolean("vr_controls", on).commit(), null));
+        screen.addView(m.plain("Камеры (для трекинга рук)", v -> new android.app.AlertDialog.Builder(this)
+                .setTitle("Камеры").setMessage(CameraInfo.dump(this)).setPositiveButton("Ок", null).show()), m.buttonParams(4, 44));
         root.addView(screen, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(screen, n++);
 
@@ -379,6 +385,19 @@ public class LauncherActivity extends Activity {
             ExtrasFile.setFps(this, Settings.showFps(this));
             final StringBuilder envText = new StringBuilder();
             if (gestures) envText.append("HORIZON_TOUCH_GESTURES=1\n");
+            if (Settings.vr(this)) {
+                envText.append("HORIZON_VR=1\n");
+                // vr.txt next to game-env.txt: HORIZON_VR_IPD=0.064, HORIZON_VR_FOV=90, HORIZON_VR_K1=0.441, HORIZON_VR_K2=0.156
+                File tune = new File(home, "vr.txt");
+                if (tune.isFile()) {
+                    try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(tune))) {
+                        for (String line; (line = r.readLine()) != null; ) {
+                            line = line.trim();
+                            if (line.startsWith("HORIZON_VR_") && line.indexOf('=') > 0) envText.append(line).append('\n');
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
             String warning = null;
             boolean signed = false;
             if (Ely.signedIn(prefs)) {

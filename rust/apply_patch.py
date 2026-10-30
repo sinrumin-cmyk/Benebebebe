@@ -35,8 +35,8 @@ edit(client / "src/lib.rs", [(
 edit(client / "src/game.rs", [
     ("mod clipboard;\n", "mod clipboard;\nmod touch;\n"),
     ("let mut args = std::env::args().skip(1);", "let mut args = horizon_client::platform::args().into_iter();"),
-    ("EventLoop::new()?.run_app(&mut game)?;", "horizon_client::platform::event_loop()?.run_app(&mut game)?;"),
-    ("EventLoop::new()?.run_app(&mut app)?;", "horizon_client::platform::event_loop()?.run_app(&mut app)?;"),
+    ("EventLoop::new()?.run_app(&mut game)", "horizon_client::platform::event_loop()?.run_app(&mut game)"),
+    ("EventLoop::new()?.run_app(&mut app)", "horizon_client::platform::event_loop()?.run_app(&mut app)"),
     ("                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))\n                .is_ok();",
      "                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))\n                .is_ok()\n                || cfg!(target_os = \"android\"); // winit cannot grab on Android; touch look needs `captured`"),
     ("        if self.pending_save.is_some() {\n            match self.poll_closing_save() {",
@@ -51,7 +51,8 @@ edit(client / "src/game/pad.rs", [(
 )])
 
 # Ely.by (and other Yggdrasil servers): session files of type "ely", and HORIZON_JOIN_URL as the join endpoint.
-edit(client / "src/auth.rs", [
+auth_rs = next(iter(sorted(root.glob("crates/*/src/auth.rs"))))  # lives in horizon-client-render in newer trees
+edit(auth_rs, [
     ('if field("user_type").is_some_and(|t| t != "msa") {',
      'if field("user_type").is_some_and(|t| !matches!(t, "msa" | "ely")) {'),
     ('    let doc = discovery()?;\n    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;\n    match agent()',
@@ -186,6 +187,151 @@ for marker, fn in (("const CORNERS = array<u32, 36>", fix_cull),
     if fixed == 0 and fn is not fix_portal:
         sys.exit(f"no shader contains {marker!r}: the Adreno fix needs updating")
 
+# ---------------------------------------------------------------- phone VR (stereo, 3DoF)
+# See vr.rs. The renderer draws the frame once per eye into half-width textures and composites them with lens
+# distortion. Every anchor must match exactly once, or nothing is written for the file.
+render_src = root / "crates/horizon-client-render/src"
+shutil.copy(here / "vr.rs", render_src / "gfx/vr.rs")
+shutil.copy(here / "vr.wgsl", render_src / "gfx/vr.wgsl")
+
+DRAW_VR = """    /// Phone VR: a frame is two draws, left eye then right, each into its own texture the size of `config`
+    /// (one eye), then both onto the swapchain with the lens distortion (`vr::Vr::composite`).
+    fn draw_vr(&mut self, frame: &Frame) -> Result<bool> {
+        let size = [self.config.width, self.config.height];
+        if let Some(vr) = &mut self.vr {
+            vr.ensure_eyes(&self.device, size);
+        }
+        for eye in 0..2 {
+            self.eye = Some(eye);
+            let drawn = self.draw_frame(frame);
+            self.eye = None;
+            if !drawn? {
+                return Ok(false);
+            }
+        }
+        self.present_vr()
+    }
+    fn present_vr(&mut self) -> Result<bool> {
+        let acquire = Instant::now();
+        let acquired = self.surface.as_ref().map(|s| s.get_current_texture());
+        self.last_wait = acquire.elapsed();
+        let (surface_frame, reconfigure) = match acquired {
+            None => return Ok(false),
+            Some(wgpu::CurrentSurfaceTexture::Success(f)) => (f, false),
+            Some(wgpu::CurrentSurfaceTexture::Suboptimal(f)) => (f, true),
+            Some(wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded) => {
+                return Ok(false);
+            }
+            Some(wgpu::CurrentSurfaceTexture::Outdated) => {
+                self.configure_surface();
+                return Ok(false);
+            }
+            Some(wgpu::CurrentSurfaceTexture::Lost) => {
+                self.recreate_surface()?;
+                return Ok(false);
+            }
+            Some(wgpu::CurrentSurfaceTexture::Validation) => {
+                return Err("surface acquisition failed validation".into());
+            }
+        };
+        let target = surface_frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                format: Some(self.config.format.remove_srgb_suffix()),
+                ..Default::default()
+            });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Horizon VR frame"),
+            });
+        if let Some(vr) = &self.vr {
+            vr.composite(&self.device, &self.queue, &mut encoder, &target);
+        }
+        self.queue.submit([encoder.finish()]);
+        let present = Instant::now();
+        if self.config.present_mode == wgpu::PresentMode::Fifo {
+            self.window.pre_present_notify();
+        }
+        self.queue.present(surface_frame);
+        if reconfigure {
+            self.configure_surface();
+        }
+        self.last_wait += present.elapsed();
+        Ok(true)
+    }
+"""
+
+edit(render_src / "gfx.rs", [
+    ("mod view;\nmod wgsl_prefix;\n", "mod view;\npub mod vr;\nmod wgsl_prefix;\n"),
+    ("    pub config: wgpu::SurfaceConfiguration,\n    solid: wgpu::RenderPipeline,\n",
+     "    pub config: wgpu::SurfaceConfiguration,\n"
+     "    /// Phone VR (`HORIZON_VR=1`): `config` is then one eye, the swapchain's size is in here.\n"
+     "    vr: Option<vr::Vr>,\n"
+     "    /// The eye being drawn right now (0 left, 1 right), `None` outside VR.\n"
+     "    eye: Option<usize>,\n"
+     "    solid: wgpu::RenderPipeline,\n"),
+    ("        let offscreen = surface\n            .is_none()\n            .then(|| Self::offscreen_target(&device, &config));\n",
+     "        // Phone VR: from here on `config` describes one eye (half the width); the surface keeps its size\n"
+     "        // in `vr.surface` and `surface_config` gives it back.\n"
+     "        let mut config = config;\n"
+     "        let vr = (surface.is_some() && vr::enabled()).then(|| vr::Vr::new(&device, &mut config));\n"
+     "        let offscreen = surface\n            .is_none()\n            .then(|| Self::offscreen_target(&device, &config));\n"),
+    ("            spare_surface: std::sync::Mutex::new(None),\n            offscreen,\n",
+     "            spare_surface: std::sync::Mutex::new(None),\n            offscreen,\n            vr,\n            eye: None,\n"),
+    ("        let mut config = self.config.clone();\n        if let Some(hdr) = &self.hdr {",
+     "        let mut config = self.config.clone();\n"
+     "        if let Some(vr) = &self.vr {\n            config.width = vr.surface[0];\n            config.height = vr.surface[1];\n        }\n"
+     "        if let Some(hdr) = &self.hdr {"),
+    ("        self.config.width = width;\n        self.config.height = height;\n        if let Some(surface) = &self.surface {",
+     "        if let Some(vr) = &mut self.vr {\n            vr.surface = [width, height];\n        }\n"
+     "        self.config.width = if self.vr.is_some() { (width / 2).max(1) } else { width };\n"
+     "        self.config.height = height;\n        if let Some(surface) = &self.surface {"),
+    ("    pub fn views(&self, frame: &Frame) -> ViewSet {\n"
+     "        ViewSet::single(self.screen_view(\n"
+     "            frame.fov_degrees,\n"
+     "            frame.yaw,\n"
+     "            frame.pitch,\n"
+     "            frame.depth_far,\n"
+     "        ))\n"
+     "    }\n",
+     "    pub fn views(&self, frame: &Frame) -> ViewSet {\n"
+     "        // VR has its own lens: the game's field of view (sprinting, zoom) would swim in a headset.\n"
+     "        let fov = self.vr.as_ref().map_or(frame.fov_degrees, |v| v.fov);\n"
+     "        let view = self.screen_view(fov, frame.yaw, frame.pitch, frame.depth_far);\n"
+     "        ViewSet::single(match (&self.vr, self.eye) {\n"
+     "            (Some(vr), Some(eye)) => vr.eye_view(view, eye),\n"
+     "            _ => view,\n"
+     "        })\n"
+     "    }\n"),
+    ("        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));\n        Frustum {",
+     "        // VR: wider than either eye sees, so entities at the edge of an eye are not culled early.\n"
+     "        let fov_degrees = self.vr.as_ref().map_or(fov_degrees, |v| v.fov + 12.0);\n"
+     "        let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));\n        Frustum {"),
+    ("    pub fn render(&mut self, frame: &Frame) -> Result<bool> {\n        let rendered = self.draw_frame(frame);",
+     "    pub fn render(&mut self, frame: &Frame) -> Result<bool> {\n"
+     "        let rendered = if self.vr.is_some() {\n            self.draw_vr(frame)\n        } else {\n            self.draw_frame(frame)\n        };"),
+    ("        let acquired = self.surface.as_ref().map(|s| s.get_current_texture());\n        self.last_wait = acquire.elapsed();",
+     "        // An eye of a VR frame draws into its own texture; `present_vr` acquires the swapchain after both.\n"
+     "        let acquired = self\n            .surface\n            .as_ref()\n            .filter(|_| self.eye.is_none())\n            .map(|s| s.get_current_texture());\n"
+     "        self.last_wait = acquire.elapsed();"),
+    ("            (None, _) => self.offscreen.clone().ok_or(\"no offscreen target\")?,",
+     "            (None, _) => match (&self.vr, self.eye) {\n"
+     "                (Some(vr), Some(eye)) => vr.eye_texture(eye).ok_or(\"no eye target\")?,\n"
+     "                _ => self.offscreen.clone().ok_or(\"no offscreen target\")?,\n"
+     "            },"),
+    ("        let taa = !frame.title\n",
+     "        let taa = !frame.title\n            // TAA keeps one history; two eyes would trade it back and forth.\n            && self.vr.is_none()\n"),
+    ("            // No swapchain paces offscreen frames: keep two on the GPU at most.\n            self.in_flight.push_back(submission);\n",
+     "            // No swapchain paces offscreen frames: keep two on the GPU at most. (An eye of a VR frame is\n"
+     "            // paced by the swapchain the composite acquires.)\n"
+     "            if self.eye.is_none() {\n                self.in_flight.push_back(submission);\n            }\n"),
+    ("    fn draw_frame(&mut self, frame: &Frame) -> Result<bool> {\n        self.arena.trim();",
+     DRAW_VR + "    fn draw_frame(&mut self, frame: &Frame) -> Result<bool> {\n        self.arena.trim();"),
+])
+
+# The head's turn drives the game's yaw and pitch (game/touch.rs), the shell feeds it (android.rs nativeHead).
+
 NOT_ANDROID = "[target.'cfg(not(target_os = \"android\"))'.dependencies]"
 
 def move_arboard(cargo):
@@ -234,11 +380,17 @@ android_log-sys = "0.3"
 print("patched crates/horizon-client/Cargo.toml")
 
 if "--linux-cfg" in sys.argv:
-    files = ["horizon-bench/src/hardware.rs", "horizon-client/src/crash.rs", "horizon-client/src/game.rs",
-             "horizon-client/src/telemetry.rs", "horizon-friends/src/portmap.rs",
-             "horizon-telemetry/src/system.rs", "horizon-threads/src/lib.rs"]
-    for rel in files:
-        p = root / "crates" / rel
-        t = p.read_text()
-        p.write_text(t.replace('target_os = "linux"', 'any(target_os = "linux", target_os = "android")'))
-        print("linux->linux|android", rel)
+    # Android is Linux underneath: these files' linux-only code (procfs, threads, ports) is right for it too.
+    # Globs, because upstream moves files between crates (crash.rs and telemetry.rs now live in horizon-client-render).
+    patterns = ["horizon-bench/src/hardware.rs", "*/src/crash.rs", "horizon-client/src/game.rs",
+                "*/src/telemetry.rs", "horizon-friends/src/portmap.rs",
+                "horizon-telemetry/src/system.rs", "horizon-threads/src/lib.rs"]
+    for pattern in patterns:
+        hits = sorted((root / "crates").glob(pattern))
+        if not hits:
+            print("WARNING: --linux-cfg found no file for", pattern)
+        for p in hits:
+            t = p.read_text()
+            if 'target_os = "linux"' in t:
+                p.write_text(t.replace('target_os = "linux"', 'any(target_os = "linux", target_os = "android")'))
+                print("linux->linux|android", p.relative_to(root))

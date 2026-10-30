@@ -34,4 +34,14 @@ final class Settings {
     static boolean startInWorld(Context c) {
         return prefs(c).getBoolean("start_in_world", false);
     }
+
+    /** Phone VR: two eyes side by side, the phone's rotation sensor turns the head (HORIZON_VR=1 for the game). */
+    static boolean vr(Context c) {
+        return prefs(c).getBoolean("vr", false);
+    }
+
+    /** Keep the touch controls on the screen in VR (a viewer with a touch lever, or taking the phone out to try). */
+    static boolean vrControls(Context c) {
+        return prefs(c).getBoolean("vr_controls", true);
+    }
 }
