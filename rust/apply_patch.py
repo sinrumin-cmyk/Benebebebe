@@ -56,6 +56,36 @@ edit(client / "src/game.rs", [
      "                WindowEvent::RedrawRequested => {\n                    horizon_client::touch_input::count_frame();\n                    self.observe_fullscreen();"),
 ])
 
+def edit_if_present(path, pairs):
+    """For code that only exists in some upstream versions: skip quietly when the file or the anchor is not there."""
+    if not path.exists():
+        print("skipped (no file)", path.relative_to(root))
+        return
+    text = path.read_text()
+    todo = [(o, n) for o, n in pairs if text.count(o) == 1]
+    if len(todo) != len(pairs):
+        print("skipped (anchor not present)", path.relative_to(root))
+        return
+    edit(path, todo)
+
+# winit's KeyEventExtModifierSupplement (key_without_modifiers) exists only on desktop. On Android the plain logical key
+# stands in for it: a soft keyboard has no modifier layers to look through.
+edit_if_present(root / "crates/horizon-client-input/src/keybinds.rs", [(
+    "use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;",
+    "#[cfg(not(target_os = \"android\"))]\n"
+    "use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;\n"
+    "#[cfg(target_os = \"android\")]\n"
+    "trait KeyEventExtModifierSupplement {\n"
+    "    fn key_without_modifiers(&self) -> winit::keyboard::Key;\n"
+    "}\n"
+    "#[cfg(target_os = \"android\")]\n"
+    "impl KeyEventExtModifierSupplement for winit::event::KeyEvent {\n"
+    "    fn key_without_modifiers(&self) -> winit::keyboard::Key {\n"
+    "        self.logical_key.clone()\n"
+    "    }\n"
+    "}",
+)])
+
 edit(client / "src/game/pad.rs", [(
     "let state = hardware.merge(&self.pad.injected);",
     "let state = hardware\n            .merge(&self.pad.injected)\n            .merge(&horizon_client::touch_input::pad());",
