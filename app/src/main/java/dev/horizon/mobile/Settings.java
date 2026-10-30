@@ -52,6 +52,16 @@ final class Settings {
         return mode == MODE_HANDS ? "Только руки" : mode == MODE_MIXED ? "Руки + геймпад" : "Только геймпад";
     }
 
+    /** The camera id the user picked for hand tracking, or "" for the automatic choice (the widest back camera). */
+    static String handCamera(Context c) {
+        return prefs(c).getString("hand_camera", "");
+    }
+
+    /** Extra quarter turns of the camera picture (0..3), if it comes out sideways or upside down on this phone. */
+    static int handRotation(Context c) {
+        return Math.max(0, Math.min(3, prefs(c).getInt("hand_rotation", 0)));
+    }
+
     /** What is drawn of the tracked hands over the game: 0 nothing, 1 a window with the skeleton, 2 virtual hands that move like the real ones. */
     static int handVis(Context c) {
         int v = prefs(c).getInt("hand_vis", 0);

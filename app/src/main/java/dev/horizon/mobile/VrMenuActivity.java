@@ -88,6 +88,9 @@ public class VrMenuActivity extends Activity {
         items.add(new Item("VR в игре",
                 () -> Settings.vr(this) ? "включено" : "выключено",
                 () -> toggleVr(), d -> toggleVr()));
+        items.add(new Item("Камера рук",
+                () -> cameraLabel(),
+                () -> cycleCamera(1), d -> cycleCamera(d)));
         items.add(new Item("Показ рук",
                 () -> Settings.handVisName(Settings.handVis(this)),
                 () -> cycleVis(1), d -> cycleVis(d)));
@@ -112,6 +115,25 @@ public class VrMenuActivity extends Activity {
             pointerShown = false;
             hover = -1;
         }
+    }
+
+    private String cameraLabel() {
+        String want = Settings.handCamera(this);
+        if (want.isEmpty()) return "авто";
+        for (HandTracker.CameraOption o : HandTracker.cameras(this)) if (o.id.equals(want)) return o.label;
+        return "авто";
+    }
+
+    /** Auto, then each back camera. The camera is reopened right away if the hands are on. */
+    private void cycleCamera(int d) {
+        java.util.List<HandTracker.CameraOption> list = HandTracker.cameras(this);
+        int n = list.size() + 1;                       // 0 = auto
+        int at = 0;
+        String want = Settings.handCamera(this);
+        for (int i = 0; i < list.size(); i++) if (list.get(i).id.equals(want)) at = i + 1;
+        at = ((at + d) % n + n) % n;
+        Settings.prefs(this).edit().putString("hand_camera", at == 0 ? "" : list.get(at - 1).id).commit();
+        if (hands != null) { hands.stop(); startHands(); }
     }
 
     private void cycleVis(int d) {

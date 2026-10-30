@@ -86,6 +86,52 @@ final class HandTracker {
 
     private final Activity activity;
     private final Output out;
+
+    // ---- what is going on, for the hand test screen
+    volatile String stage = "не запущен";
+    volatile String lastError = "";
+    volatile String cameraName = "";
+    volatile int framesSeen, framesWithHands;
+    private volatile boolean wantPreview;
+    private int gen;   // each start() is a new generation: callbacks of an older camera open must not touch the new one
+
+    /** A camera the user can pick for hand tracking. */
+    static final class CameraOption {
+        final String id, label;
+        CameraOption(String id, String label) { this.id = id; this.label = label; }
+    }
+
+    /** Every back camera the phone lets apps open, with its field of view: the widest one is usually the best for hands. */
+    static java.util.List<CameraOption> cameras(Context c) {
+        java.util.List<CameraOption> list = new ArrayList<>();
+        try {
+            CameraManager cm = (CameraManager) c.getSystemService(Context.CAMERA_SERVICE);
+            for (String id : cm.getCameraIdList()) {
+                CameraCharacteristics ch = cm.getCameraCharacteristics(id);
+                Integer facing = ch.get(CameraCharacteristics.LENS_FACING);
+                if (facing == null || facing != CameraCharacteristics.LENS_FACING_BACK) continue;
+                list.add(new CameraOption(id, "Задняя " + id + fovText(ch)));
+            }
+        } catch (Throwable ignored) {}
+        return list;
+    }
+
+    private static String fovText(CameraCharacteristics ch) {
+        float[] focal = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+        SizeF size = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
+        if (focal == null || focal.length == 0 || size == null) return "";
+        return " · " + Math.round(Math.toDegrees(2 * Math.atan(size.getWidth() / (2 * focal[0])))) + "°";
+    }
+
+    /** The camera's picture goes into every HandFrame (for the test screen). Costs a copy per frame: off by default. */
+    void setPreview(boolean on) { wantPreview = on; }
+
+    /** One line per fact, for the test screen. */
+    String report() {
+        return "Шаг: " + stage + "\nКамера: " + (cameraName.isEmpty() ? "—" : cameraName)
+                + "\nКадров с камеры: " + framesSeen + ", с руками: " + framesWithHands
+                + (lastError.isEmpty() ? "" : "\nОшибка: " + lastError);
+    }
     private final HandlerThread thread = new HandlerThread("horizon-hands");
     private Handler handler;
     private CameraDevice camera;
@@ -118,6 +164,11 @@ final class HandTracker {
     /** Opens the camera and the model. Needs the CAMERA permission. Safe to call again after stop(). */
     synchronized void start() {
         if (running) return;
+        gen++;
+        framesSeen = 0;
+        framesWithHands = 0;
+        lastError = "";
+        stage = "загрузка модели";
         try {
             if (!thread.isAlive()) thread.start();
             if (handler == null) handler = new Handler(thread.getLooper());
@@ -129,6 +180,7 @@ final class HandTracker {
                     .setMinHandPresenceConfidence(0.5f)
                     .setMinTrackingConfidence(0.5f)
                     .build());
+            stage = "модель загружена, открываю камеру";
             running = true;
             openCamera();
         } catch (Throwable e) {
@@ -150,10 +202,12 @@ final class HandTracker {
         CameraManager cm = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
         String best = null;
         double bestFov = 0;
+        final String wanted = Settings.handCamera(activity);
         for (String id : cm.getCameraIdList()) {
             CameraCharacteristics ch = cm.getCameraCharacteristics(id);
             Integer facing = ch.get(CameraCharacteristics.LENS_FACING);
             if (facing == null || facing != CameraCharacteristics.LENS_FACING_BACK) continue;
+            if (!wanted.isEmpty() && id.equals(wanted)) { best = id; break; }   // the user's pick wins
             float[] focal = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
             SizeF size = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
             double fov = focal != null && focal.length > 0 && size != null
@@ -162,7 +216,9 @@ final class HandTracker {
         }
         if (best == null) throw new CameraAccessException(CameraAccessException.CAMERA_ERROR, "нет задней камеры");
         final String id = best;
+        final int myGen = gen;
         final CameraCharacteristics ch = cm.getCameraCharacteristics(id);
+        cameraName = "Задняя " + id + fovText(ch) + (wanted.equals(id) ? " (выбрана)" : " (авто)");
         Integer so = ch.get(CameraCharacteristics.SENSOR_ORIENTATION);
         sensorOrientation = so == null ? 90 : so;
 
@@ -186,9 +242,10 @@ final class HandTracker {
                 cm.openCamera(id, new CameraDevice.StateCallback() {
                     @Override public void onOpened(CameraDevice device) {
                         synchronized (HandTracker.this) {
-                            if (!running) { device.close(); return; }
+                            if (!running || myGen != gen) { device.close(); return; }
                             camera = device;
                         }
+                        stage = "камера открыта, настраиваю поток";
                         createSession(device, zoom);
                     }
                     @Override public void onDisconnected(CameraDevice device) { device.close(); }
@@ -215,6 +272,7 @@ final class HandTracker {
 
     @SuppressWarnings("deprecation")
     private void createSession(CameraDevice device, float zoom) {
+        final int sessionGen = gen;
         try {
             final Surface surface = reader.getSurface();
             final CaptureRequest.Builder rb = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -224,11 +282,12 @@ final class HandTracker {
             device.createCaptureSession(Collections.singletonList(surface), new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession s) {
                     synchronized (HandTracker.this) {
-                        if (!running) { s.close(); return; }
+                        if (!running || sessionGen != gen) { s.close(); return; }
                         session = s;
                     }
                     try {
                         s.setRepeatingRequest(rb.build(), null, handler);
+                        stage = "камера идёт";
                         Log.i(TAG, "camera running");
                     } catch (Throwable e) {
                         fail("Камера для рук: " + e);
@@ -250,6 +309,8 @@ final class HandTracker {
     }
 
     private void fail(String message) {
+        lastError = message;
+        stage = "ошибка";
         Log.e(TAG, message);
         activity.runOnUiThread(() -> android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show());
     }
@@ -266,6 +327,7 @@ final class HandTracker {
                 if (!running || landmarker == null) return;
                 lm = landmarker;
             }
+            framesSeen++;
             toBitmap(image);
             image.close();
             image = null;
@@ -281,6 +343,7 @@ final class HandTracker {
             }
             process(result, bitmap.getWidth(), bitmap.getHeight(), SystemClock.uptimeMillis());
         } catch (Throwable e) {
+            lastError = "кадр: " + e;
             Log.w(TAG, "frame: " + e);
         } finally {
             if (image != null) image.close();
@@ -294,7 +357,7 @@ final class HandTracker {
     private void toBitmap(Image image) {
         final int sw = image.getWidth() / 2, sh = image.getHeight() / 2;
         int deg = displayDegrees();
-        final int k = ((sensorOrientation - deg) % 360 + 360) % 360;
+        final int k = ((sensorOrientation - deg + 90 * Settings.handRotation(activity)) % 360 + 360) % 360;
         final boolean swap = k == 90 || k == 270;
         final int ow = swap ? sh : sw, oh = swap ? sw : sh;
         if (bitmap == null || bitmap.getWidth() != ow || bitmap.getHeight() != oh) {
@@ -430,6 +493,8 @@ final class HandTracker {
     private void publish(Hand lh, Hand rh, int w, int h) {
         HandFrame fr = new HandFrame();
         fr.aspect = (float) w / h;
+        if (lh != null || rh != null) framesWithHands++;
+        if (wantPreview && bitmap != null) fr.preview = bitmap.copy(Bitmap.Config.ARGB_8888, false);
         if (lh != null) { fr.present[HandFrame.LEFT] = true; System.arraycopy(lh.pts, 0, fr.pts[HandFrame.LEFT], 0, 63); fr.state[HandFrame.LEFT] = left.state; }
         if (rh != null) { fr.present[HandFrame.RIGHT] = true; System.arraycopy(rh.pts, 0, fr.pts[HandFrame.RIGHT], 0, 63); fr.state[HandFrame.RIGHT] = right.state; }
         fr.leftActive = leftActive && lh != null;

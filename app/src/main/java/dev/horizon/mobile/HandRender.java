@@ -116,6 +116,10 @@ final class HandRender {
         paint.setColor(0xAA000000);
         rect.set(x, y, x + w, y + h);
         c.drawRoundRect(rect, h * 0.06f, h * 0.06f, paint);
+        if (f.preview != null) {
+            paint.setColor(0xFFFFFFFF);
+            c.drawBitmap(f.preview, null, rect, paint);
+        }
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(Math.max(1f, h * 0.008f));
         paint.setColor(0x44FFFFFF);

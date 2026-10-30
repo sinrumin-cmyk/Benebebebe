@@ -2,6 +2,9 @@ package dev.horizon.mobile;
 
 /** What the camera saw in one frame, after HandTracker's analysis. Handed to listeners and never changed afterwards. */
 final class HandFrame {
+    /** The camera picture this frame was analysed from, upright, only when asked for (the test screen). */
+    android.graphics.Bitmap preview;
+
     static final int OPEN = 0, PINCH = 1, FIST = 2;
     static final int LEFT = 0, RIGHT = 1;
 

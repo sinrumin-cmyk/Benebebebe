@@ -236,6 +236,7 @@ public class LauncherActivity extends Activity {
         visScroll.addView(visRow);
         input.addView(visScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(40), 8));
         refreshVis();
+        input.addView(m.tonal("Проверка рук и выбор камеры", v -> startActivity(new Intent(this, HandTestActivity.class))), m.buttonParams(12, 48));
         input.addView(m.tonal("Открыть VR-меню (руки / геймпад)", v -> startActivity(new Intent(this, VrMenuActivity.class))), m.buttonParams(12, 48));
         root.addView(input, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(input, n++);
