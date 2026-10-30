@@ -112,6 +112,7 @@ public class HorizonActivity extends NativeActivity {
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm == null) return;
             keyboardShown = show;
+            if (hardware != null) hardware.setFocusable(!show);
             if (show) {
                 ime.requestFocus();
                 imm.restartInput(ime);
@@ -234,6 +235,9 @@ public class HorizonActivity extends NativeActivity {
     }
 
     private View overlay;
+    private HardwareInput hardware;
+    private boolean mainFocus, hardwareFocus, forwardedFocus;
+    private final android.os.Handler focusHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private volatile HandOverlay handView;
 
     /**
@@ -243,6 +247,7 @@ public class HorizonActivity extends NativeActivity {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
+        addHardwareInput();
         addHandOverlay();
         if (overlay != null || (Settings.vr(this) && !Settings.vrControls(this))) return;
         try {
@@ -315,6 +320,45 @@ public class HorizonActivity extends NativeActivity {
         return super.dispatchGenericMotionEvent(e);
     }
 
+    /** Keyboard, mouse and gamepad: see HardwareInput. They go to the game from here, not through NativeActivity. */
+    private void addHardwareInput() {
+        if (hardware != null) return;
+        try {
+            hardware = new HardwareInput(this, getWindowManager(), new HardwareInput.Host() {
+                @Override public void padKey(KeyEvent e) { if (pad != null) pad.onKey(e); }
+                @Override public void padMotion(android.view.MotionEvent e) { if (pad != null) pad.onMotion(e); }
+                @Override public void back() { runOnUiThread(() -> onBackPressed()); }
+                @Override public void focusChanged(boolean focused) { hardwareFocus = focused; syncFocus(); }
+            });
+            hardware.attach(getWindow().getDecorView().getWindowToken());
+        } catch (Throwable e) {
+            hardware = null;
+        }
+    }
+
+    /**
+     * NativeActivity tells the game when the window loses focus (the game then pauses). Focus moving between the
+     * game's window and the keyboard window above it is not that, so the game is told only when neither has it, and
+     * a loss only if it lasts.
+     */
+    private final Runnable focusFlush = () -> {
+        boolean now = mainFocus || hardwareFocus;
+        if (now != forwardedFocus) {
+            forwardedFocus = now;
+            forwardFocus(now);
+        }
+    };
+
+    private void forwardFocus(boolean focused) {
+        super.onWindowFocusChanged(focused);
+    }
+
+    private void syncFocus() {
+        focusHandler.removeCallbacks(focusFlush);
+        if (mainFocus || hardwareFocus) focusFlush.run();
+        else focusHandler.postDelayed(focusFlush, 250);
+    }
+
     /** The hand visualizer: a window above the game that lets every touch through (see HandOverlay). */
     private void addHandOverlay() {
         int vis = Settings.handVis(this);
@@ -347,13 +391,15 @@ public class HorizonActivity extends NativeActivity {
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
+        mainFocus = hasFocus;
         if (hasFocus) hideSystemUi();
+        syncFocus();
     }
 
     @Override
     protected void onDestroy() {
         try { if (handView != null) getWindowManager().removeViewImmediate(handView); } catch (Throwable ignored) {}
+        if (hardware != null) hardware.detach();
         try { if (overlay != null) getWindowManager().removeViewImmediate(overlay); } catch (Throwable ignored) {}
         super.onDestroy();
         // android_main can only run once per process: leave the :game process so the next Play starts clean.

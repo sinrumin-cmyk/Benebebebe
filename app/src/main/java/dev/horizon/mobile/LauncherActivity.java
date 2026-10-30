@@ -25,6 +25,34 @@ public class LauncherActivity extends Activity {
     private EditText world, nick;
     private SeekBar dist;
     private LinearLayout modeRow, visRow;
+    private TextView serverStatus, serverLog;
+    private TextView serverButton;
+    private final android.os.Handler serverHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable serverTick = new Runnable() {
+        @Override public void run() {
+            serverHandler.removeCallbacks(this);
+            if (serverStatus == null) return;
+            if (!ServerService.available(LauncherActivity.this)) {
+                serverStatus.setText("Сервера нет в этой сборке: Pumpkin не собрался под Android (смотри шаг «Build the Pumpkin server» в GitHub Actions).");
+                serverButton.setVisibility(View.GONE);
+                serverLog.setVisibility(View.GONE);
+                return;
+            }
+            boolean on = ServerService.running();
+            StringBuilder t = new StringBuilder("Состояние: ").append(ServerService.state());
+            t.append("\nВерсия игры: ").append(ServerService.MINECRAFT_VERSION).append(" (зашита в сборку, без выбора)");
+            t.append("\nНа этом телефоне: 127.0.0.1:").append(ServerService.PORT);
+            for (String a : ServerService.addresses()) t.append("\nПо Wi-Fi друзьям: ").append(a);
+            t.append("\nБез проверки аккаунтов (режим offline): пускает любое имя. Не открывай порт в интернет.");
+            t.append("\nСервер и игра на одном телефоне, особенно с VR, сильно грузят его: для VR лучше сервер на другом устройстве.");
+            serverStatus.setText(t);
+            serverButton.setText(on ? "Остановить сервер" : "Запустить сервер");
+            StringBuilder log = new StringBuilder();
+            for (String line : ServerService.logTail(12)) log.append(line).append('\n');
+            serverLog.setText(log);
+            serverHandler.postDelayed(this, 1000);
+        }
+    };
     private Switch startInWorld, creativeSwitch;
     private float dp;
 
@@ -241,6 +269,22 @@ public class LauncherActivity extends Activity {
         root.addView(input, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
         m.enter(input, n++);
 
+        // ---- the built-in server (Pumpkin), always Minecraft 26.3
+        LinearLayout server = m.card("Свой сервер: Pumpkin, Minecraft " + ServerService.MINECRAFT_VERSION, "🖥");
+        serverStatus = m.text("", Md3.BODY, m.onVariant);
+        server.addView(serverStatus);
+        serverButton = m.tonal("", v -> {
+            if (ServerService.running()) ServerService.stop(this); else ServerService.start(this);
+            serverTick.run();
+        });
+        server.addView(serverButton, m.buttonParams(12, 48));
+        serverLog = m.text("", Md3.BODY, m.onVariant);
+        serverLog.setTypeface(android.graphics.Typeface.MONOSPACE);
+        serverLog.setTextSize(11);
+        server.addView(serverLog, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 8));
+        root.addView(server, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 14));
+        m.enter(server, n++);
+
         // ---- account
         LinearLayout account = m.card("Аккаунт", "👤");
         accountLabel = m.text("", Md3.BODY, m.onVariant);
@@ -347,11 +391,13 @@ public class LauncherActivity extends Activity {
         super.onResume();
         if (status != null) refreshStatus();
         if (layoutLabel != null) refreshLayout();   // the editor may have changed the chosen layout
+        serverTick.run();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        serverHandler.removeCallbacks(serverTick);
         saveSettings();
     }
 
