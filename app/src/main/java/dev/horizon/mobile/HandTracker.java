@@ -334,7 +334,8 @@ final class HandTracker {
             long ts = SystemClock.uptimeMillis();
             if (ts <= lastTimestamp) ts = lastTimestamp + 1;
             lastTimestamp = ts;
-            MPImage mp = new BitmapImageBuilder(bitmap).build();
+            // MPImage.close() recycles the bitmap it wraps, so the model gets a copy: ours is reused for the next frame.
+            MPImage mp = new BitmapImageBuilder(bitmap.copy(Bitmap.Config.ARGB_8888, false)).build();
             HandLandmarkerResult result;
             try {
                 result = lm.detectForVideo(mp, ts);
