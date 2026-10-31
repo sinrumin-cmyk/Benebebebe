@@ -101,8 +101,13 @@ public final class GameOverlay extends FrameLayout implements ControlsView.Host 
 
     // ---------------------------------------------------------------- a real mouse
 
-    private static boolean fromMouse(MotionEvent e) {
-        return e.isFromSource(InputDevice.SOURCE_MOUSE) && !e.isFromSource(InputDevice.SOURCE_TOUCHSCREEN);
+    private boolean fromMouse(MotionEvent e) {
+        // DeX reports its pointer as a mouse but can also set SOURCE_TOUCHSCREEN; the tool type and
+        // any mouse-like source say what it is.
+        if (e.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) return true;
+        int sources = e.getSource();
+        return (sources & (InputDevice.SOURCE_MOUSE | InputDevice.SOURCE_MOUSE_RELATIVE
+                | InputDevice.SOURCE_TOUCHPAD | InputDevice.SOURCE_TRACKBALL)) != 0;
     }
 
     private void moved(float x, float y) {
