@@ -3,11 +3,17 @@
 struct Params {
     // k1, k2, scale, aspect of one eye image (width over height).
     k: vec4<f32>,
+    // The floating screen in each eye's image: centre x, centre y, half width, half height (0..1, y down).
+    gui_left: vec4<f32>,
+    gui_right: vec4<f32>,
+    // Screen floating (1 or 0), the cursor's x and y over the screen, cursor shown (1 or 0).
+    gui: vec4<f32>,
 }
 @group(0) @binding(0) var left_eye: texture_2d<f32>;
 @group(0) @binding(1) var right_eye: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var<uniform> params: Params;
+@group(0) @binding(4) var gui_tex: texture_2d<f32>;
 
 struct Out {
     @builtin(position) clip: vec4<f32>,
@@ -38,5 +44,24 @@ struct Out {
     // textureSampleLevel: no derivatives, so no uniform control flow to worry about.
     let a = textureSampleLevel(left_eye, samp, src, 0.0);
     let b = textureSampleLevel(right_eye, samp, src, 0.0);
-    return select(vec4(0.0, 0.0, 0.0, 1.0), select(a, b, is_right), inside);
+    var color = select(a, b, is_right);
+    if params.gui.x > 0.5 {
+        // Where this pixel of the eye image falls on the floating screen, 0..1 over the screen.
+        let rect = select(params.gui_left, params.gui_right, is_right);
+        let g = (src - rect.xy) / (2.0 * rect.zw) + vec2(0.5);
+        if all(g >= vec2(0.0)) && all(g <= vec2(1.0)) {
+            // The screen was drawn with alpha blending onto transparent black: its colour is already
+            // multiplied by its alpha.
+            let s = textureSampleLevel(gui_tex, samp, g, 0.0);
+            color = vec4(s.rgb + color.rgb * (1.0 - s.a), 1.0);
+            // The cursor: a round dot with a dark rim, round on the screen whatever its proportions.
+            if params.gui.w > 0.5 {
+                let d = length((g - params.gui.yz) * vec2(params.k.w, 1.0));
+                if d < 0.016 {
+                    color = vec4(select(vec3(0.0), vec3(1.0), d < 0.011), 1.0);
+                }
+            }
+        }
+    }
+    return select(vec4(0.0, 0.0, 0.0, 1.0), color, inside);
 }

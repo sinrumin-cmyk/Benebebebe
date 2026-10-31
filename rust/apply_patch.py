@@ -241,6 +241,70 @@ print("renderer lives in", render_src.relative_to(root))
 shutil.copy(here / "vr.rs", render_src / "gfx/vr.rs")
 shutil.copy(here / "vr.wgsl", render_src / "gfx/vr.wgsl")
 
+# Vivecraft-style hand and floating screen (vr.rs: `hand_pose`, `Vr::floating`).
+# 1. The first-person hand is drawn where the tracked hand is. Its own pose is between the projection and the bob.
+# 2. While a screen is open (`floating`), the HUD batch is drawn once into the VR gui texture instead of over each eye
+#    (eye 1 skips it: the texture is already drawn), and without the menu blur, which would blur the screen's own
+#    background; `vr::Vr::composite` then floats that texture in the world.
+edit(render_src / "gfx.rs", [
+    ("            view_proj: (hand_projection * frame.bob * view).to_cols_array_2d(),\n",
+     "            view_proj: (hand_projection\n"
+     "                * vr::hand_pose(self.vr.as_ref().map(|v| v.ipd), self.eye)\n"
+     "                * frame.bob\n"
+     "                * view)\n"
+     "                .to_cols_array_2d(),\n"),
+    ("""        let menu_blur = frame
+            .menu_blur
+            .filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC));
+        let blur_at = menu_blur.map_or(0, |_| frame.hud.blur_at);
+        self.hud.draw_range(
+            &mut encoder,
+            &view_target,
+            &self.depth,
+            frame.hud,
+            [self.config.width, self.config.height],
+            0..blur_at,
+        );
+""",
+     """        // Phone VR with a screen open: the screen is drawn once into the floating screen's texture.
+        let gui_float = self.vr.as_ref().is_some_and(|v| v.floating());
+        let gui_view = self.vr.as_ref().filter(|_| gui_float).and_then(|v| v.gui_view());
+        let gui_skip = gui_float && self.eye == Some(1);
+        if gui_float && !gui_skip && let Some(vr) = &self.vr {
+            vr.clear_gui(&mut encoder);
+        }
+        let hud_target = gui_view.as_ref().unwrap_or(&view_target);
+        let menu_blur = frame
+            .menu_blur
+            .filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC) && !gui_float);
+        let blur_at = menu_blur.map_or(0, |_| frame.hud.blur_at);
+        self.hud.draw_range(
+            &mut encoder,
+            hud_target,
+            &self.depth,
+            frame.hud,
+            [self.config.width, self.config.height],
+            0..if gui_skip { 0 } else { blur_at },
+        );
+"""),
+    ("""            &view_target,
+            &self.depth,
+            frame.hud,
+            [self.config.width, self.config.height],
+            blur_at..frame.hud.vertices.len() as u32,
+""",
+     """            hud_target,
+            &self.depth,
+            frame.hud,
+            [self.config.width, self.config.height],
+            if gui_skip {
+                0..0
+            } else {
+                blur_at..frame.hud.vertices.len() as u32
+            },
+"""),
+])
+
 DRAW_VR = """    /// Phone VR: a frame is two draws, left eye then right, each into its own texture the size of `config`
     /// (one eye), then both onto the swapchain with the lens distortion (`vr::Vr::composite`).
     fn draw_vr(&mut self, frame: &Frame) -> Result<bool> {

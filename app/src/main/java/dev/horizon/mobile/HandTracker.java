@@ -82,6 +82,11 @@ final class HandTracker {
         void pointer(boolean present, float x, float y);
         /** Every camera frame: both hands' landmarks, for drawing them. */
         default void frame(HandFrame f) {}
+        /**
+         * Every camera frame: the hand in the head's frame (metres: x right, y up, -z ahead; the right hand only) and
+         * the ray from the eye through a hand (degrees: yaw right, pitch up; either hand).
+         */
+        default void hand(boolean poseValid, float x, float y, float z, boolean pointerValid, float yaw, float pitch) {}
     }
 
     private final Activity activity;
@@ -141,6 +146,8 @@ final class HandTracker {
     private boolean running;
 
     private int sensorOrientation;
+    /** The camera's field of view along the sensor's long side, radians (the widest it shows, zoom included). */
+    private double fovLong = Math.toRadians(70);
     private Bitmap bitmap;
     private int[] pixels;
     private long lastTimestamp;
@@ -235,6 +242,12 @@ final class HandTracker {
         reader.setOnImageAvailableListener(r -> onFrame(r), handler);
 
         final float zoom = wideZoom(ch);
+        float[] focal = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+        SizeF phys = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
+        if (focal != null && focal.length > 0 && phys != null) {
+            double fov = 2 * Math.atan(phys.getWidth() / (2 * focal[0]));
+            fovLong = zoom > 0 && zoom < 1 ? 2 * Math.atan(Math.tan(fov / 2) / zoom) : fov;
+        }
         // Permission is checked by the caller (HorizonActivity) before start().
         @SuppressWarnings("MissingPermission")
         Runnable open = () -> {
@@ -489,6 +502,34 @@ final class HandTracker {
             out.pointer(false, 0, 0);
         }
         publish(lh, rh, w, h);
+        publishHand(rh, rh != null ? rh : lh, w, h);
+    }
+
+    /**
+     * Where the hand is, for the game: the camera sees what the eyes would, so a point of the picture is a ray from
+     * the head, and the palm's size in the picture (a palm is about 8.5 cm from wrist to knuckle) gives how far along
+     * it the hand is.
+     */
+    private void publishHand(Hand pose, Hand pointer, int w, int h) {
+        if (pointer == null) {
+            out.hand(false, 0, 0, 0, false, 0, 0);
+            return;
+        }
+        double tanLong = Math.tan(fovLong / 2), tanH, tanV;
+        if (w >= h) { tanH = tanLong; tanV = tanLong * h / w; } else { tanV = tanLong; tanH = tanLong * w / h; }
+        float[] p = place(pointer, w, h, tanH, tanV);
+        out.hand(pose != null, p[0], p[1], p[2], true, p[3], p[4]);
+    }
+
+    /** {x, y, z (metres, head frame), ray yaw and pitch (degrees)} of a hand. */
+    private static float[] place(Hand hand, int w, int h, double tanH, double tanV) {
+        double rx = (hand.cx - 0.5) * 2 * tanH, ry = (0.5 - hand.cy) * 2 * tanV;
+        double len = Math.sqrt(rx * rx + ry * ry + 1);
+        double palm = Math.hypot((hand.pts[0] - hand.pts[27]) * w / (double) h, hand.pts[1] - hand.pts[28]);
+        double dist = palm > 0.01 ? Math.max(0.15, Math.min(0.9, 0.085 / (2 * tanV * palm))) : 0.4;
+        return new float[] {
+                (float) (rx / len * dist), (float) (ry / len * dist), (float) (-1 / len * dist),
+                (float) Math.toDegrees(Math.atan(rx)), (float) Math.toDegrees(Math.atan(ry))};
     }
 
     private void publish(Hand lh, Hand rh, int w, int h) {
@@ -570,6 +611,7 @@ final class HandTracker {
     private void releaseAll() {
         out.pointer(false, 0, 0);
         out.frame(new HandFrame());
+        out.hand(false, 0, 0, 0, false, 0, 0);
         moveStick(0, 0);
         for (int i = 0; i < down.length; i++) setButton(i, false);
         leftActive = false;

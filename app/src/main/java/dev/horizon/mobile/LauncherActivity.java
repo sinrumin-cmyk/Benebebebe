@@ -256,8 +256,10 @@ public class LauncherActivity extends Activity {
         modeScroll.addView(modeRow);
         input.addView(modeScroll, m.lp(ViewGroup.LayoutParams.MATCH_PARENT, px(40), 12));
         refreshModes();
-        input.addView(m.text("Показ рук: «Руки в сцене» рисует поверх игры руки, повторяющие настоящие (по суставам, глубина по размеру ладони); "
-                + "«Окошко» — скелет и зона левой руки для настройки.", Md3.BODY, m.onVariant), m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 12));
+        input.addView(m.text("Показ рук. «Рука в мире»: рука и предмет в ней двигаются там, где ваша настоящая рука, как в Vivecraft. "
+                + "В VR меню, инвентарь и чат всплывают перед вами и стоят на месте, пока вы поворачиваете голову; наводить курсор можно рукой "
+                + "(щипок — левая кнопка, кулак — правая). «Руки поверх» рисует 2D-руки поверх картинки, «Окошко» показывает скелет для настройки.",
+                Md3.BODY, m.onVariant), m.lp(ViewGroup.LayoutParams.MATCH_PARENT, -2, 12));
         visRow = m.row();
         HorizontalScrollView visScroll = new HorizontalScrollView(this);
         visScroll.setHorizontalScrollBarEnabled(false);
@@ -329,7 +331,7 @@ public class LauncherActivity extends Activity {
     private void refreshVis() {
         visRow.removeAllViews();
         int current = Settings.handVis(this);
-        for (int v = 0; v <= 2; v++) {
+        for (int v = 0; v <= Settings.HAND_WORLD; v++) {
             final int vv = v;
             TextView chip = m.chip(Settings.handVisName(v), v == current, x -> {
                 prefs.edit().putInt("hand_vis", vv).commit();

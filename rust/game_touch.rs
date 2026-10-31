@@ -87,17 +87,43 @@ impl Game<'_> {
         let id = window.id();
         let size = window.inner_size();
         let (w, h) = (size.width as f32, size.height as f32);
+        // The game lays its screens out in what the renderer says its size is (`Renderer::config`): in VR one eye's,
+        // not the window's. The cursor lives in that space.
+        let (cw, ch) = if horizon_client::gfx::vr::enabled() {
+            let eye = horizon_client::gfx::vr::eye_size();
+            if eye[0] > 0 { (eye[0] as f32, eye[1] as f32) } else { (w / 2.0, h) }
+        } else {
+            (w, h)
+        };
         let device_id = DeviceId::dummy();
 
         let wants_text = self.wants_text();
         touch_input::set_wants_text(wants_text);
         let grabbed = self.captured && self.screen == Screen::Playing;
         touch_input::set_cursor_shown(!grabbed);
+        // Phone VR: the screen floats in the world (vr.rs); the hand's ray moves the cursor on it.
+        let hand_cursor = horizon_client::gfx::vr::enabled() && !grabbed && {
+            let (cx, cy) = touch_input::cursor(cw, ch);
+            horizon_client::gfx::vr::set_screen(true, cx / cw.max(1.0), cy / ch.max(1.0));
+            match horizon_client::gfx::vr::gui_pointer_uv() {
+                Some((u, v)) => {
+                    let (dx, dy) = (u * cw - cx, v * ch - cy);
+                    if dx.abs() >= 0.5 || dy.abs() >= 0.5 {
+                        touch_input::push_mouse_move(dx, dy);
+                    }
+                    true
+                }
+                None => false,
+            }
+        };
+        if horizon_client::gfx::vr::enabled() && grabbed {
+            horizon_client::gfx::vr::set_screen(false, 0.5, 0.5);
+        }
         // Playing with the view grabbed: moves turn the camera (raw pixels, as a grabbed mouse).
         let playing = grabbed && self.focused;
 
         // The virtual mouse's buttons: the layout's attack and use buttons click where the cursor is.
-        if touch_input::virtual_mouse() && !grabbed {
+        if (touch_input::virtual_mouse() || hand_cursor) && !grabbed {
             let pad = touch_input::pad();
             let now = u8::from(pad.triggers[1] > 0.5) | (u8::from(pad.triggers[0] > 0.5) << 1);
             let before = TRIGGERS.swap(now, Ordering::Relaxed);
@@ -127,8 +153,8 @@ impl Game<'_> {
                         self.mouse.on_move(0.0, 0.0, f64::from(dx), f64::from(dy), true, true);
                         self.last_input = Instant::now();
                     } else {
-                        let (cx, cy) = touch_input::cursor(w, h);
-                        let (x, y) = ((cx + dx).clamp(0.0, w), (cy + dy).clamp(0.0, h));
+                        let (cx, cy) = touch_input::cursor(cw, ch);
+                        let (x, y) = ((cx + dx).clamp(0.0, cw), (cy + dy).clamp(0.0, ch));
                         touch_input::set_cursor(x, y);
                         let position = PhysicalPosition::new(f64::from(x), f64::from(y));
                         self.window_event(event_loop, id, WindowEvent::CursorMoved { device_id, position });

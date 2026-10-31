@@ -65,11 +65,14 @@ final class Settings {
     /** What is drawn of the tracked hands over the game: 0 nothing, 1 a window with the skeleton, 2 virtual hands that move like the real ones. */
     static int handVis(Context c) {
         int v = prefs(c).getInt("hand_vis", 0);
-        return v < 0 || v > 2 ? 0 : v;
+        return v < 0 || v > HAND_WORLD ? 0 : v;
     }
 
+    /** The first-person arm of the game follows the real hand, as in Vivecraft (vr.rs `hand_pose`). */
+    static final int HAND_WORLD = 3;
+
     static String handVisName(int v) {
-        return v == 1 ? "Окошко со скелетом" : v == 2 ? "Руки в сцене" : "Выкл";
+        return v == 1 ? "Окошко со скелетом" : v == 2 ? "Руки поверх (2D)" : v == HAND_WORLD ? "Рука в мире (как Vivecraft)" : "Выкл";
     }
 
     /** Hands from the back camera are a controller (HandTracker): left hand walks, right hand acts. */

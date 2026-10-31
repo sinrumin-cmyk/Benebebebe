@@ -41,7 +41,6 @@ final class Launch {
             ExtrasFile.setFps(act, Settings.showFps(act));
             final StringBuilder envText = new StringBuilder();
             if (gestures) envText.append("HORIZON_TOUCH_GESTURES=1\n");
-            envText.append("HORIZON_GPU_CULL=shader\n");
             if (Settings.vr(act)) {
                 envText.append("HORIZON_VR=1\n");
                 // vr.txt next to game-env.txt: HORIZON_VR_IPD=0.064, HORIZON_VR_FOV=90, HORIZON_VR_K1=0.441, HORIZON_VR_K2=0.156

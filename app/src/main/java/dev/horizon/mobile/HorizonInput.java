@@ -28,6 +28,12 @@ public final class HorizonInput {
     public static native long nativeFrames();
     /** True while a text field has the focus in the game. */
     public static native boolean nativeWantsText();
+
+    /**
+     * The tracked hand in the head's frame: where it is in metres (x right, y up, -z ahead) for the first-person arm,
+     * and the ray it points along (degrees, yaw right and pitch up) for the cursor on the floating screen.
+     */
+    public static native void nativeHand(boolean poseValid, float x, float y, float z, boolean pointerValid, float yaw, float pitch);
     /** Phone VR: the head's orientation in degrees (yaw right-positive, pitch down-positive, roll right-positive). */
     public static native void nativeHead(float yaw, float pitch, float roll);
     /** The cursor to draw: x in the high 32 bits, y in the low ones; -1 for none. */

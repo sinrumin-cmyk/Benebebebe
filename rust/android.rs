@@ -111,6 +111,25 @@ pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeHead(
     crate::gfx::vr::set_head(yaw, pitch, roll);
 }
 
+/// The tracked hand (HandTracker.java): where it is in the head's frame in metres (x right, y up, -z ahead), for the
+/// first-person arm, and the ray it points along relative to the head (degrees, yaw to the right and pitch up), for
+/// the cursor on the floating screen. Each has its own valid flag.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeHand(
+    _env: JNIEnv,
+    _class: JClass,
+    pose_valid: jboolean,
+    x: jfloat,
+    y: jfloat,
+    z: jfloat,
+    pointer_valid: jboolean,
+    yaw: jfloat,
+    pitch: jfloat,
+) {
+    crate::gfx::vr::set_hand(pose_valid != 0, x, y, z);
+    crate::gfx::vr::set_gui_pointer(pointer_valid != 0, yaw, pitch);
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_horizon_mobile_HorizonInput_nativeStick(
     _env: JNIEnv,

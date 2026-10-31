@@ -8,8 +8,9 @@
 //! `HORIZON_VR_IPD` (metres between the eyes, 0.064), `HORIZON_VR_FOV` (vertical degrees, 90),
 //! `HORIZON_VR_K1`, `HORIZON_VR_K2` (lens distortion, 0.441 and 0.156; 0 and 0 turns it off).
 use super::view::View;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 struct Head {
@@ -64,6 +65,185 @@ pub fn take_head_delta() -> (f32, f32) {
     delta
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// The hand, Vivecraft style. The shell (HandTracker.java) tracks a hand with the phone's camera and says where it is
+// in the head's frame: metres, x to the right, y up, -z ahead. The first-person arm and the item in it are then
+// drawn there (`hand_pose`), not at their fixed place at the bottom right of the view.
+
+#[derive(Clone, Copy)]
+struct HandState {
+    /// Where the camera last saw it, and when.
+    target: Vec3,
+    fed: Option<Instant>,
+    /// Where it is drawn: eased toward `target` on every frame.
+    shown: Vec3,
+    tracking: bool,
+    drawn: Option<Instant>,
+}
+
+static HAND: Mutex<HandState> = Mutex::new(HandState {
+    target: Vec3::ZERO,
+    fed: None,
+    shown: Vec3::ZERO,
+    tracking: false,
+    drawn: None,
+});
+
+/// `valid` false when the hand is out of the camera's view.
+pub fn set_hand(valid: bool, x: f32, y: f32, z: f32) {
+    let mut h = HAND.lock().unwrap_or_else(|e| e.into_inner());
+    if valid {
+        h.target = Vec3::new(x, y, z);
+        h.fed = Some(Instant::now());
+    } else {
+        h.fed = None;
+    }
+}
+
+/// Where vanilla draws the right arm in the view (`ItemInHandRenderer`: translate 0.64, -0.6, -0.72).
+const DEFAULT_HAND: Vec3 = Vec3::new(0.64, -0.6, -0.72);
+/// The right shoulder in the head's frame: the arm points from here to the hand.
+const SHOULDER: Vec3 = Vec3::new(0.25, -0.5, 0.05);
+
+/// The extra pose of the first-person hand, to put between the hand's projection and its own pose. Identity (the
+/// vanilla place) when no hand is tracked. `eye` and `ipd` shift it so each eye sees the hand at its own depth:
+/// the eyes' views already contain their sideways offset, this undoes it around the hand's placement.
+pub fn hand_pose(ipd: Option<f32>, eye: Option<usize>) -> Mat4 {
+    let mut h = HAND.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let fresh = h.fed.is_some_and(|t| now.duration_since(t).as_millis() < 400);
+    if !fresh {
+        h.tracking = false;
+        return Mat4::IDENTITY;
+    }
+    if !h.tracking {
+        h.shown = h.target;   // it just came into view: no sliding in from wherever it was last
+        h.tracking = true;
+    } else if let Some(last) = h.drawn {
+        let dt = now.duration_since(last).as_secs_f32().min(0.1);
+        let ease = 1.0 - (-dt * 20.0).exp();
+        h.shown = h.shown.lerp(h.target, ease);
+    }
+    h.drawn = Some(now);
+    let p = h.shown;
+    let aim = (p - SHOULDER).normalize_or_zero();
+    if aim == Vec3::ZERO {
+        return Mat4::IDENTITY;
+    }
+    let rotation = Quat::from_rotation_arc(Vec3::NEG_Z, aim);
+    let pose = Mat4::from_translation(p) * Mat4::from_quat(rotation) * Mat4::from_translation(-DEFAULT_HAND);
+    match (ipd, eye) {
+        (Some(ipd), Some(eye)) => {
+            let side = if eye == 0 { 1.0 } else { -1.0 };
+            let e = Mat4::from_translation(Vec3::new(side * ipd / 2.0, 0.0, 0.0));
+            e * pose * e.inverse()
+        }
+        _ => pose,
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The screen floating in the world. While a screen is open (a menu, the inventory, chat) the HUD batch, which is
+// the screen, is not stretched over each eye: it is drawn once into `Vr::gui` and the compositor puts it in front
+// of the player, fixed where the player was looking when it opened, so the head can turn away from it. The cursor
+// is moved by the hand's ray (`set_gui_pointer`) where the hand is tracked.
+
+#[derive(Clone, Copy)]
+struct GuiState {
+    open: bool,
+    /// Where the screen was put: the head's yaw and pitch when it opened.
+    anchor: (f32, f32),
+    /// The game's cursor over the screen, 0..1.
+    cursor: (f32, f32),
+    /// The hand's ray relative to the head (degrees: yaw to the right, pitch up) and when it was last seen.
+    ray: Option<(f32, f32, Instant)>,
+}
+
+static GUI: Mutex<GuiState> = Mutex::new(GuiState {
+    open: false,
+    anchor: (0.0, 0.0),
+    cursor: (0.5, 0.5),
+    ray: None,
+});
+
+fn gui() -> MutexGuard<'static, GuiState> {
+    GUI.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The game says every tick whether a screen with a cursor is open and where its cursor is (0..1 over the screen).
+pub fn set_screen(open: bool, cursor_u: f32, cursor_v: f32) {
+    let (yaw, pitch) = {
+        let h = head();
+        (h.yaw, h.pitch)
+    };
+    let mut g = gui();
+    if open && !g.open {
+        g.anchor = (yaw, pitch);
+    }
+    g.open = open;
+    g.cursor = (cursor_u, cursor_v);
+}
+
+pub fn screen_open() -> bool {
+    gui().open
+}
+
+/// The hand's pointing ray in the head's frame; `valid` false when no hand is seen.
+pub fn set_gui_pointer(valid: bool, yaw_right: f32, pitch_up: f32) {
+    let mut g = gui();
+    g.ray = valid.then(|| (yaw_right, pitch_up, Instant::now()));
+}
+
+/// The place on the floating screen the hand points at, 0..1 from its top left corner, if a hand points at it.
+pub fn gui_pointer_uv() -> Option<(f32, f32)> {
+    let g = gui();
+    if !g.open || !floating_enabled() {
+        return None;
+    }
+    let (ray_yaw, ray_pitch, at) = g.ray?;
+    if at.elapsed().as_millis() > 400 {
+        return None;
+    }
+    let h = head();
+    // Panel and ray in the same terms, tangents of the angles from where the head looks (see `Vr::gui_rect`).
+    let panel_x = wrap_degrees(g.anchor.0 - h.yaw).to_radians().tan();
+    let panel_y = (h.pitch - g.anchor.1).to_radians().tan();
+    let size = gui_scale();
+    // The screen's half width in tangents: `size` of the half view, whose half width is tan(fov/2) * aspect.
+    let (half_x, half_y) = (size * view_tangents().0, size * view_tangents().1);
+    let nx = (ray_yaw.to_radians().tan() - panel_x) / half_x;
+    let ny = (ray_pitch.to_radians().tan() - panel_y) / half_y;
+    Some((0.5 + 0.5 * nx, 0.5 - 0.5 * ny))
+}
+
+/// Where the eye's field of view ends, as tangents (horizontal, vertical); set by the compositor each frame.
+static TANGENTS: Mutex<(f32, f32)> = Mutex::new((1.0, 1.0));
+
+fn view_tangents() -> (f32, f32) {
+    *TANGENTS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One eye's size (what `Renderer::config` says), for the shell's cursor.
+static EYE_SIZE: Mutex<[u32; 2]> = Mutex::new([0, 0]);
+
+pub fn eye_size() -> [u32; 2] {
+    *EYE_SIZE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn floating_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("HORIZON_VR_GUI").map_or(true, |v| v != "0"))
+}
+
+/// The floating screen's size: this much of an eye's view.
+fn gui_scale() -> f32 {
+    static SCALE: OnceLock<f32> = OnceLock::new();
+    *SCALE.get_or_init(|| env_f32("HORIZON_VR_GUI_SCALE", 0.8, 0.2, 1.5))
+}
+
+/// How far in front the screen is, for the difference between the eyes.
+const GUI_DISTANCE: f32 = 2.0;
+
 /// Whether the launcher asked for VR.
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -82,6 +262,11 @@ fn env_f32(name: &str, default: f32, min: f32, max: f32) -> f32 {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
     k: [f32; 4],
+    /// The floating screen in each eye's image, 0..1: centre x, centre y, half width, half height.
+    gui_left: [f32; 4],
+    gui_right: [f32; 4],
+    /// On (1 or 0), the cursor's x and y over the screen, cursor shown (1 or 0).
+    gui: [f32; 4],
 }
 
 pub struct Vr {
@@ -94,6 +279,8 @@ pub struct Vr {
     k: [f32; 2],
     format: wgpu::TextureFormat,
     eyes: Option<([u32; 2], [wgpu::Texture; 2])>,
+    /// The screen drawn once, the size of one eye; see `floating`.
+    gui_texture: Option<wgpu::Texture>,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -125,6 +312,7 @@ impl Vr {
             entries: &[
                 texture(0),
                 texture(1),
+                texture(4),
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -197,6 +385,7 @@ impl Vr {
             ],
             format,
             eyes: None,
+            gui_texture: None,
             pipeline,
             layout,
             sampler,
@@ -230,6 +419,8 @@ impl Vr {
             })
         };
         self.eyes = Some((size, [make("Horizon left eye"), make("Horizon right eye")]));
+        self.gui_texture = Some(make("Horizon floating screen"));
+        *EYE_SIZE.lock().unwrap_or_else(|e| e.into_inner()) = size;
     }
 
     /// What `eye` (0 left, 1 right) is drawn into.
@@ -248,6 +439,51 @@ impl Vr {
         }
     }
 
+    /// Whether the screen is floating in the world now: a screen is open and the renderer has what it needs.
+    pub fn floating(&self) -> bool {
+        self.gui_texture.is_some() && screen_open() && floating_enabled()
+    }
+
+    /// The texture the HUD batch is drawn into while the screen floats.
+    pub fn gui_view(&self) -> Option<wgpu::TextureView> {
+        self.gui_texture.as_ref().map(|t| t.create_view(&Default::default()))
+    }
+
+    /// Empties the floating screen's texture, transparent, before the HUD is drawn into it.
+    pub fn clear_gui(&self, encoder: &mut wgpu::CommandEncoder) {
+        let Some(view) = self.gui_view() else {
+            return;
+        };
+        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Horizon floating screen clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+
+    /// Where the floating screen is in `eye`'s image (centre and half size, 0..1 from the top left): fixed in the
+    /// world where it was put, so it moves across the view as the head turns, and a little differently for each
+    /// eye because it is `GUI_DISTANCE` metres away.
+    fn gui_rect(&self, eye: usize, aspect: f32) -> [f32; 4] {
+        let g = *gui();
+        let h = *head();
+        let t = (self.fov.to_radians() / 2.0).tan();
+        let side = if eye == 0 { 1.0 } else { -1.0 };
+        let x = wrap_degrees(g.anchor.0 - h.yaw).to_radians().tan() / (t * aspect)
+            + side * (self.ipd / 2.0) / GUI_DISTANCE / (t * aspect);
+        let y = (h.pitch - g.anchor.1).to_radians().tan() / t;
+        let size = gui_scale();
+        [0.5 + 0.5 * x, 0.5 - 0.5 * y, 0.5 * size, 0.5 * size]
+    }
+
     /// Draws both eyes side by side into `target` (the swapchain image's non-sRGB view).
     pub fn composite(
         &self,
@@ -263,12 +499,23 @@ impl Vr {
         let [k1, k2] = self.k;
         // The vertical edge of the lens circle maps onto the vertical edge of the image.
         let scale = 1.0 / (1.0 + k1 + k2).max(0.1);
+        let t = (self.fov.to_radians() / 2.0).tan();
+        *TANGENTS.lock().unwrap_or_else(|e| e.into_inner()) = (t * aspect, t);
+        let floating = self.floating();
+        let cursor = gui().cursor;
         let params = Params {
             k: [k1, k2, scale, aspect],
+            gui_left: self.gui_rect(0, aspect),
+            gui_right: self.gui_rect(1, aspect),
+            gui: [if floating { 1.0 } else { 0.0 }, cursor.0, cursor.1, 1.0],
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&params));
         let left = eyes[0].create_view(&Default::default());
         let right = eyes[1].create_view(&Default::default());
+        let Some(gui_texture) = &self.gui_texture else {
+            return;
+        };
+        let gui_view = gui_texture.create_view(&Default::default());
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Horizon VR"),
             layout: &self.layout,
@@ -288,6 +535,10 @@ impl Vr {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&gui_view),
                 },
             ],
         });

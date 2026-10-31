@@ -137,7 +137,7 @@ public class VrMenuActivity extends Activity {
     }
 
     private void cycleVis(int d) {
-        int v = ((Settings.handVis(this) + d) % 3 + 3) % 3;
+        int v = ((Settings.handVis(this) + d) % 4 + 4) % 4;
         Settings.prefs(this).edit().putInt("hand_vis", v).commit();
     }
 

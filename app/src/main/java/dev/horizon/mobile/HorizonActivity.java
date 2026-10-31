@@ -56,6 +56,7 @@ public class HorizonActivity extends NativeActivity {
         }
         // Input modes (launcher / VR menu): 1 hands only, 2 hands + gamepad, 3 gamepad only. The mux merges the sources.
         mux = new InputMux(InputMux.GAME);
+        worldHand = Settings.handVis(this) == Settings.HAND_WORLD;
         if (Settings.pad(this)) pad = new GamepadInput(mux);
         if (Settings.hands(this)) {
             final InputMux.Source handSource = mux.source(InputMux.HANDS);
@@ -66,6 +67,10 @@ public class HorizonActivity extends NativeActivity {
                 @Override public void frame(HandFrame f) {
                     HandOverlay v = handView;
                     if (v != null) v.setFrame(f);
+                }
+                @Override public void hand(boolean poseValid, float x, float y, float z, boolean pointerValid, float yaw, float pitch) {
+                    // The arm follows the hand only when "hand in the world" is chosen; the pointer is for the VR screen.
+                    HorizonInput.nativeHand(poseValid && worldHand, x, y, z, pointerValid, yaw, pitch);
                 }
             });
         }
@@ -239,6 +244,7 @@ public class HorizonActivity extends NativeActivity {
     private boolean mainFocus, hardwareFocus, forwardedFocus;
     private final android.os.Handler focusHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private volatile HandOverlay handView;
+    private boolean worldHand;
 
     /**
      * NativeActivity takes the window's surface, so views added to its own window are never drawn
@@ -362,7 +368,7 @@ public class HorizonActivity extends NativeActivity {
     /** The hand visualizer: a window above the game that lets every touch through (see HandOverlay). */
     private void addHandOverlay() {
         int vis = Settings.handVis(this);
-        if (hands == null || vis == 0 || handView != null) return;
+        if (hands == null || vis == 0 || vis == Settings.HAND_WORLD || handView != null) return;
         try {
             HandOverlay v = new HandOverlay(this, Settings.vr(this), vis);
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
