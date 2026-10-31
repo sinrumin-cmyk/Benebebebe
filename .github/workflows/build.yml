@@ -62,7 +62,7 @@ jobs:
           cp "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/"
 
-      - name: Build the Pumpkin server for Android (optional: without it the APK just has no server)
+      - name: "Build the Pumpkin server for Android (optional, without it the APK just has no server)"
         continue-on-error: true
         run: |
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"

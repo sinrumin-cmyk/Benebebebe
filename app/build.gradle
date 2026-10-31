@@ -7,8 +7,8 @@ android {
         applicationId 'dev.horizon.mobile'
         minSdk 26
         targetSdk 33
-        versionCode 1560
-        versionName '15.6-vivecraft-hands'
+        versionCode 1561
+        versionName '15.6.1-vivecraft-hands'
         ndk { abiFilters 'arm64-v8a' }
     }
     packaging { jniLibs { useLegacyPackaging = true } }
